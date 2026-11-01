@@ -9,11 +9,25 @@ WidgetMetadata = {
   detailCacheDuration: 300,
   globalParams: [
     {
+      name: "loginServer",
+      title: "登录服务地址（推荐）",
+      type: "input",
+      value: "",
+      description: "扫码登录 Worker 的 HTTPS 地址，例如 https://bili-login.xxx.workers.dev。配置后无需手工填 Cookie。"
+    },
+    {
+      name: "loginKey",
+      title: "登录 Key",
+      type: "input",
+      value: "",
+      description: "在登录服务页面扫码后得到的 bk_ 开头的 key。仅绑定扫码时的浏览器。"
+    },
+    {
       name: "cookie",
       title: "B站 Cookie（可选）",
       type: "input",
       value: "",
-      description: "填写 SESSDATA 等 Cookie 可观看 1080P+ 与会员内容；留空只能看公开清晰度。"
+      description: "备用方式。填写 SESSDATA 等 Cookie 可观看 1080P+ 与会员内容；配置登录服务后留空即可。"
     }
   ],
   modules: [
@@ -316,7 +330,46 @@ async function wbiSign(params, query) {
   return Object.assign(Object.fromEntries(pairs), { w_rid: wRid });
 }
 
+function normalizeServer(value) {
+  const server = String(value || "").trim().replace(/\/+$/, "");
+  if (!server || server.length > 512 || /[\r\n\s]/.test(server) || !/^https:\/\//i.test(server)) return "";
+  return server;
+}
+
+function normalizeLoginKey(value) {
+  const key = String(value || "").trim();
+  return /^bk_[a-f0-9]{32}$/.test(key) ? key : "";
+}
+
+function loginSession(params) {
+  const server = normalizeServer(params && params.loginServer);
+  const key = normalizeLoginKey(params && params.loginKey);
+  return server && key ? { server, key } : null;
+}
+
+async function proxyRequest(params, path, query = {}, referer = REFERER) {
+  const session = loginSession(params);
+  if (!session) return null;
+  const target = new URL(`${API}${path}`);
+  Object.entries(query).forEach(([name, value]) => target.searchParams.set(name, String(value)));
+  const response = await Widget.http.get(`${session.server}/api/proxy`, {
+    headers: { "X-Bili-Key": session.key, Referer: REFERER },
+    params: { url: target.toString() }
+  });
+  const body = getBody(response);
+  if (!body) throw new Error("登录服务返回异常");
+  if (body.code !== 0) {
+    const error = new Error(body.message || body.msg || `B站接口错误 ${body.code}`);
+    error.code = body.code;
+    throw error;
+  }
+  return body.data;
+}
+
 async function apiGet(params, path, query = {}, referer = REFERER) {
+  if (loginSession(params)) {
+    return proxyRequest(params, path, query, referer);
+  }
   const buvid = await ensureBuvid();
   const cookie = normalizeCookie(params && params.cookie);
   const cookieHeader = ["buvid3=" + (buvid || "0"), "b_nut=1", cookie].filter(Boolean).join("; ");

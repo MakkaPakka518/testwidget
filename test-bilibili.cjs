@@ -2,6 +2,7 @@ const fs = require("fs");
 const assert = require("assert/strict");
 const target = process.argv[2] || "./widgets/bilibili.js";
 const calls = [];
+const proxyCalls = [];
 
 const VIEW = {
   bvid: "BV1Nax16uEHm",
@@ -42,6 +43,20 @@ global.Widget = {
   http: {
     get: async (url, options = {}) => {
       calls.push({ url, options });
+      if (url.includes("/api/proxy")) {
+        assert.equal(options.headers["X-Bili-Key"], "bk_" + "a".repeat(32), "必须携带登录 key");
+        proxyCalls.push(options.params.url);
+        const target = new URL(options.params.url);
+        assert.ok(target.hostname === "api.bilibili.com", "代理目标必须是B站");
+        if (target.pathname === "/x/web-interface/view") {
+          const bvid = target.searchParams.get("bvid");
+          if (bvid !== VIEW.bvid) return { data: { code: -404, message: "啥都木有" } };
+          return ok(VIEW);
+        }
+        if (target.pathname === "/x/player/playurl") return ok(PLAYURL);
+        if (target.pathname === "/x/web-interface/popular") return ok({ list: [VIEW] });
+        return { data: { code: 0, data: {} } };
+      }
       if (url.endsWith("/x/frontend/finger/spi")) return ok({ b_3: "BUVID3-TEST" });
       if (url.endsWith("/x/web-interface/nav")) {
         return ok({ isLogin: false, wbi_img: {
@@ -123,7 +138,27 @@ eval(fs.readFileSync(target, "utf8"));
   assert.equal(await loadDetail("bili:bvid:BV0000000000"), null);
   assert.deepEqual(await loadResource({ link: "https://evil.test/video/BV1Nax16uEHm", id: "bili:bvid:BV1Nax16uEHm" }), []);
 
-  console.log("Bilibili widget tests passed", { target, calls: calls.length });
+  const loginParams = { loginServer: "https://bili-login.example/", loginKey: "bk_" + "a".repeat(32) };
+  const loginPopular = await loadPopular({ ...loginParams, count: "5" });
+  assert.equal(loginPopular.length, 1, "登录服务模式下应能取到列表");
+  assert.ok(proxyCalls.some((u) => u.includes("/x/web-interface/popular")), "必须走登录服务代理");
+  assert.ok(!calls.some((c) => c.url.endsWith("/x/frontend/finger/spi") && c.after === "login"), "登录模式不应再取 buvid");
+
+  const loginDetail = await loadDetail("bili:bvid:BV1Nax16uEHm");
+  assert.ok(loginDetail, "详情应可解析");
+
+  const loginRes = await loadResource({ ...loginParams, link: "bili:bvid:BV1Nax16uEHm" });
+  assert.ok(loginRes.length >= 2, "登录模式应取到播放线路");
+  assert.ok(proxyCalls.some((u) => u.includes("/x/player/playurl")), "播放地址需走代理");
+
+  const beforeInsecure = proxyCalls.length;
+  await loadResource({ loginServer: "http://insecure.example", loginKey: loginParams.loginKey, link: "bili:bvid:BV1Nax16uEHm" });
+  assert.equal(proxyCalls.length, beforeInsecure, "非 HTTPS 地址不得走登录服务");
+  const beforeBadKey = proxyCalls.length;
+  await loadResource({ loginServer: loginParams.loginServer, loginKey: "bad-key", link: "bili:bvid:BV1Nax16uEHm" });
+  assert.equal(proxyCalls.length, beforeBadKey, "非法 key 不得走登录服务");
+
+  console.log("Bilibili widget tests passed", { target, calls: calls.length, proxy: proxyCalls.length });
 })().catch((error) => {
   console.error(error);
   process.exit(1);
