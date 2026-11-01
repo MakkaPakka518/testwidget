@@ -7,6 +7,7 @@ ForwardWidget/rex 测试模块。
 - 模块文件：[`widgets/twitter.js`](widgets/twitter.js)
 - 仅返回含视频或 GIF 视频的推文，自动过滤纯文字和图片推文。
 - 支持用户视频列表、关键词视频搜索、`@用户`搜索、推文链接解析及多清晰度 MP4/HLS 播放。
+- 支持手动填写 X List 链接并聚合列表内全部用户的视频；默认列表为 `https://x.com/i/lists/1655997863032401921`。该功能需要 X Cookie（`auth_token`、`ct0`）和现有 Playwright HTTPS 服务。
 - 数据来自 FxTwitter v2 公共 API，不需要 X 登录 Cookie。
 
 ## TikTok
@@ -36,7 +37,8 @@ PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 接口：
 
 - `GET /health`
-- `POST /v1/recommend`，使用 `Authorization: Bearer <token>`
+- `POST /v1/recommend`：TikTok For You，使用 `Authorization: Bearer <token>`
+- `POST /v1/x-list-videos`：X List 视频，使用同一 Bearer Token
 
 当前 VPS Origin 为 `http://167.253.64.235:3217`。请先配置 Cloudflare HTTPS 反代，再把 HTTPS 地址和 Token 填入 rex 模块全局参数；不要通过明文 HTTP 发送 Cookie。
 

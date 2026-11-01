@@ -71,6 +71,13 @@ global.Widget = {
         return { data: { code: 200, status: videoStatus(detailMatch[1], "DirectUser") } };
       }
       throw new Error(`unmocked url: ${url}`);
+    },
+    post: async (url, body, options = {}) => {
+      calls.push({ url, body, options });
+      if (url === "https://browser.example.com/v1/x-list-videos") {
+        return { statusCode: 200, data: { items: [videoStatus("2102147636702634198", "ListUser"), photoStatus()] } };
+      }
+      throw new Error(`unmocked post url: ${url}`);
     }
   }
 };
@@ -79,6 +86,27 @@ global.WidgetMetadata = {};
 eval(fs.readFileSync(target, "utf8"));
 
 (async () => {
+  const listVideos = await loadListVideos({
+    listUrl: "https://x.com/i/lists/1655997863032401921",
+    xCookie: "auth_token=test-auth; ct0=test-csrf",
+    browserServer: "https://browser.example.com/",
+    browserToken: "test-browser-token",
+    count: "20"
+  });
+  assert.equal(listVideos.length, 1);
+  const listCall = calls.find((call) => call.url === "https://browser.example.com/v1/x-list-videos");
+  assert.equal(listCall.body.listUrl, "https://x.com/i/lists/1655997863032401921");
+  assert.equal(listCall.body.cookie, "auth_token=test-auth; ct0=test-csrf");
+  assert.equal(listCall.options.headers.Authorization, "Bearer test-browser-token");
+  const callsBeforeBadList = calls.length;
+  assert.deepEqual(await loadListVideos({
+    listUrl: "https://x.com.evil.test/i/lists/1655997863032401921",
+    xCookie: "auth_token=test-auth; ct0=test-csrf",
+    browserServer: "https://browser.example.com",
+    browserToken: "test-browser-token"
+  }), []);
+  assert.equal(calls.length, callsBeforeBadList);
+
   const list = await loadUserVideos({ username: "SpaceX", count: "20", language: "zh-cn" });
   assert.equal(list.length, 1, "纯图片推文必须被过滤");
   assert.equal(list[0].type, "url");
@@ -86,8 +114,9 @@ eval(fs.readFileSync(target, "utf8"));
   assert.equal(list[0].id, "https://x.com/SpaceX/status/2102147636702634195");
   assert.equal(list[0].link, "xstatus:2102147636702634195");
   assert.equal(list[0].videoUrl, undefined);
-  assert.equal(calls[0].options.params.count, "20");
-  assert.equal(calls[0].options.params.lang, "zh-cn");
+  const userMediaCall = calls.find((call) => call.url.includes("/2/profile/SpaceX/media"));
+  assert.equal(userMediaCall.options.params.count, "20");
+  assert.equal(userMediaCall.options.params.lang, "zh-cn");
 
   const callsAfterList = calls.length;
   const detail = await loadDetail(list[0].link);

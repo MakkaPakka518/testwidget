@@ -1,9 +1,9 @@
 WidgetMetadata = {
   id: "com.x.video",
   title: "X / Twitter 视频",
-  version: "1.0.0",
+  version: "1.1.0",
   requiredVersion: "0.0.1",
-  description: "X/Twitter 视频模块：用户视频、搜索、推文链接解析与多清晰度播放",
+  description: "X/Twitter 视频模块：List 聚合、用户视频、搜索、链接解析与多清晰度播放",
   author: "OpenCode",
   site: "https://x.com",
   detailCacheDuration: 300,
@@ -18,9 +18,47 @@ WidgetMetadata = {
         { title: "繁体中文", value: "zh-tw" },
         { title: "不翻译", value: "" }
       ]
+    },
+    {
+      name: "xCookie",
+      title: "X Cookie（列表可选）",
+      type: "input",
+      value: "",
+      description: "获取 X List 视频需要包含 auth_token 和 ct0 的 Cookie，请勿分享。"
+    },
+    {
+      name: "browserServer",
+      title: "浏览器服务地址（列表可选）",
+      type: "input",
+      value: "",
+      description: "现有 Playwright 服务的 HTTPS 地址。"
+    },
+    {
+      name: "browserToken",
+      title: "浏览器服务令牌（列表可选）",
+      type: "input",
+      value: "",
+      description: "访问受保护浏览器服务的令牌，请勿分享。"
     }
   ],
   modules: [
+    {
+      id: "loadListVideos",
+      title: "列表全部用户视频",
+      functionName: "loadListVideos",
+      cacheDuration: 60,
+      requiresWebView: false,
+      sectionMode: false,
+      params: [
+        {
+          name: "listUrl",
+          title: "X List 链接",
+          type: "input",
+          value: "https://x.com/i/lists/1655997863032401921"
+        },
+        { name: "count", title: "数量", type: "count", value: "20" }
+      ]
+    },
     {
       id: "loadUserVideos",
       title: "用户视频",
@@ -259,6 +297,24 @@ function languageParam(params) {
   return ["zh-cn", "zh-tw", ""].includes(language) ? language : "zh-cn";
 }
 
+function normalizeHttpsServer(value) {
+  const server = String(value || "").trim().replace(/\/+$/, "");
+  if (!server || server.length > 512 || /[\r\n\s]/.test(server) || !/^https:\/\//i.test(server)) return "";
+  return server;
+}
+
+function normalizeListUrl(value) {
+  const match = String(value || "").trim().match(/^https:\/\/(?:www\.)?x\.com\/i\/lists\/(\d{2,20})\/?(?:[?#].*)?$/i);
+  return match ? `https://x.com/i/lists/${match[1]}` : "";
+}
+
+function normalizeXCookie(value) {
+  const cookie = String(value || "").trim().replace(/^cookie\s*:\s*/i, "").trim();
+  if (!cookie || cookie.length > 16384 || /[\r\n]/.test(cookie)) return "";
+  if (!/(?:^|;\s*)auth_token=[^;]+/i.test(cookie) || !/(?:^|;\s*)ct0=[^;]+/i.test(cookie)) return "";
+  return cookie;
+}
+
 async function fetchStatus(id, language) {
   const cleanId = String(id || "");
   if (!/^\d{2,20}$/.test(cleanId)) return null;
@@ -284,6 +340,33 @@ function mapVideoResults(results) {
     .map(toVideoItem)
     .filter(Boolean);
 }
+
+loadListVideos = async function loadListVideos(params = {}) {
+  try {
+    const listUrl = normalizeListUrl(params.listUrl);
+    const cookie = normalizeXCookie(params.xCookie);
+    const server = normalizeHttpsServer(params.browserServer);
+    const token = String(params.browserToken || "").trim();
+    if (!listUrl || !cookie || !server || !token || /[\r\n]/.test(token)) return [];
+    const count = Math.min(20, Math.max(1, Number(params.count || 20)));
+    const response = await Widget.http.post(`${server}/v1/x-list-videos`, {
+      listUrl,
+      cookie,
+      limit: count
+    }, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+    const body = getBody(response);
+    if (response && Number(response.statusCode) === 401) throw new Error("浏览器服务令牌无效");
+    return body && Array.isArray(body.items) ? mapVideoResults(body.items) : [];
+  } catch (error) {
+    console.error("[X loadListVideos] 失败:", error.message || error);
+    throw error;
+  }
+};
 
 loadUserVideos = async function loadUserVideos(params = {}) {
   try {

@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { chromium } from "playwright";
+import { extractGraphqlVideoStatuses } from "./x-parser.mjs";
 
 const PORT = Number(process.env.PORT || 3217);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -83,7 +84,19 @@ function normalizeCookie(value) {
   return cookie;
 }
 
-function toBrowserCookies(cookieHeader) {
+function normalizeXCookie(value) {
+  const cookie = String(value || "").trim().replace(/^cookie\s*:\s*/i, "").trim();
+  if (!cookie || cookie.length > 16384 || /[\r\n]/.test(cookie)) return "";
+  if (!/(?:^|;\s*)auth_token=[^;]+/i.test(cookie) || !/(?:^|;\s*)ct0=[^;]+/i.test(cookie)) return "";
+  return cookie;
+}
+
+function normalizeXListUrl(value) {
+  const match = String(value || "").trim().match(/^https:\/\/(?:www\.)?x\.com\/i\/lists\/(\d{2,20})\/?(?:[?#].*)?$/i);
+  return match ? `https://x.com/i/lists/${match[1]}` : "";
+}
+
+function toBrowserCookies(cookieHeader, domain = ".tiktok.com") {
   return cookieHeader.split(";").map((part) => {
     const separator = part.indexOf("=");
     if (separator <= 0) return null;
@@ -93,7 +106,7 @@ function toBrowserCookies(cookieHeader) {
     return {
       name,
       value,
-      domain: ".tiktok.com",
+      domain,
       path: "/",
       secure: true,
       sameSite: "None"
@@ -223,13 +236,56 @@ async function collectRecommendations(cookie, language, limit) {
   }
 }
 
+async function collectXListVideos(cookie, listUrl, limit) {
+  const browser = await getBrowser();
+  const context = await browser.newContext({
+    userAgent: WEB_USER_AGENT,
+    locale: "zh-CN",
+    timezoneId: "Asia/Taipei",
+    viewport: { width: 1280, height: 900 }
+  });
+  const statuses = [];
+  const seen = new Set();
+
+  function append(items) {
+    items.forEach((item) => {
+      if (!item || seen.has(item.id) || statuses.length >= limit) return;
+      seen.add(item.id);
+      statuses.push(item);
+    });
+  }
+
+  try {
+    await context.addCookies(toBrowserCookies(cookie, ".x.com"));
+    const page = await context.newPage();
+    page.on("response", async (response) => {
+      if (!response.url().includes("/graphql/")) return;
+      try {
+        append(extractGraphqlVideoStatuses(await response.json(), limit));
+      } catch (error) {
+        // Ignore unrelated and non-JSON GraphQL responses.
+      }
+    });
+    await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    for (let index = 0; index < 3 && statuses.length < limit; index += 1) {
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
+      await page.waitForTimeout(3500);
+    }
+    return statuses.slice(0, limit);
+  } finally {
+    await context.close();
+  }
+}
+
 const server = createServer(async (request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     sendJson(response, 200, { ok: true });
     return;
   }
 
-  if (request.method !== "POST" || request.url !== "/v1/recommend") {
+  const isTikTokRecommend = request.method === "POST" && request.url === "/v1/recommend";
+  const isXListVideos = request.method === "POST" && request.url === "/v1/x-list-videos";
+  if (!isTikTokRecommend && !isXListVideos) {
     sendJson(response, 404, { error: "not_found" });
     return;
   }
@@ -254,22 +310,30 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  const cookie = normalizeCookie(body.cookie);
+  const cookie = isXListVideos ? normalizeXCookie(body.cookie) : normalizeCookie(body.cookie);
   if (!cookie) {
     sendJson(response, 400, { error: "invalid_cookie" });
     return;
   }
-  const language = body.language === "zh-Hans" ? "zh-Hans" : "zh-Hant";
   const limit = Math.min(20, Math.max(1, Number(body.limit || 12)));
+  const language = body.language === "zh-Hans" ? "zh-Hans" : "zh-Hant";
+  const listUrl = isXListVideos ? normalizeXListUrl(body.listUrl) : "";
+  if (isXListVideos && !listUrl) {
+    sendJson(response, 400, { error: "invalid_list_url" });
+    return;
+  }
   busy = true;
   const startedAt = Date.now();
 
   try {
+    const collector = isXListVideos
+      ? collectXListVideos(cookie, listUrl, limit)
+      : collectRecommendations(cookie, language, limit);
     const items = await Promise.race([
-      collectRecommendations(cookie, language, limit),
+      collector,
       new Promise((_, reject) => setTimeout(() => reject(new Error("request timed out")), REQUEST_TIMEOUT_MS))
     ]);
-    console.log("recommendation request completed", { count: items.length, elapsedMs: Date.now() - startedAt });
+    console.log("browser request completed", { type: isXListVideos ? "x-list" : "tiktok", count: items.length, elapsedMs: Date.now() - startedAt });
     sendJson(response, 200, { items });
   } catch (error) {
     console.error("recommendation request failed", { message: error.message, elapsedMs: Date.now() - startedAt });
@@ -280,7 +344,7 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`TikTok recommendation service listening on http://${HOST}:${PORT}`);
+  console.log(`Social browser service listening on http://${HOST}:${PORT}`);
 });
 
 async function shutdown() {
