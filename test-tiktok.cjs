@@ -112,7 +112,7 @@ global.WidgetMetadata = {};
 eval(fs.readFileSync(target, "utf8"));
 
 (async () => {
-  const list = await loadPopular({ region: "US", count: "20" });
+  const list = await loadPopular({ count: "20" });
   assert.equal(list.length, 1, "图集音频不能作为视频返回");
   assert.equal(list[0].type, "url");
   assert.equal(list[0].id, "https://www.tiktok.com/@scout2015/video/6718335390845095173");
@@ -120,8 +120,13 @@ eval(fs.readFileSync(target, "utf8"));
   assert.equal(list[0].videoUrl, undefined, "列表不应缓存临时播放地址");
   assert.equal(list[0].headers, undefined, "VideoItem 不支持 headers 字段");
   assert.equal(list[0].poster_path, undefined, "原始 API 字段不能泄漏");
-  assert.equal(calls[0].options.params.region, "US");
+  assert.equal(calls[0].options.params.region, "TW");
   assert.equal(calls[0].options.params.count, "20");
+  const regionParam = WidgetMetadata.modules[0].params.find((item) => item.name === "region");
+  assert.equal(regionParam.value, "TW");
+  assert.ok(regionParam.enumOptions.some((item) => item.value === "HK"));
+  assert.ok(regionParam.enumOptions.some((item) => item.value === "SG"));
+  assert.ok(regionParam.enumOptions.some((item) => item.value === "MY"));
 
   const callsAfterList = calls.length;
   const detail = await loadDetail(list[0].link);

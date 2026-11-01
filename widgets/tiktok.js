@@ -20,8 +20,12 @@ WidgetMetadata = {
           name: "region",
           title: "地区",
           type: "enumeration",
-          value: "US",
+          value: "TW",
           enumOptions: [
+            { title: "台湾（繁中）", value: "TW" },
+            { title: "香港（繁中）", value: "HK" },
+            { title: "新加坡（华语）", value: "SG" },
+            { title: "马来西亚（华语）", value: "MY" },
             { title: "美国", value: "US" },
             { title: "日本", value: "JP" },
             { title: "韩国", value: "KR" },
@@ -410,7 +414,7 @@ async function fetchFreshItem(context) {
 
 loadPopular = async function loadPopular(params = {}) {
   try {
-    const region = /^[A-Z]{2}$/.test(String(params.region || "US")) ? String(params.region || "US") : "US";
+    const region = /^[A-Z]{2}$/.test(String(params.region || "TW")) ? String(params.region || "TW") : "TW";
     const count = Math.min(30, Math.max(1, Number(params.count || 20)));
     const response = await Widget.http.get(`${TIKWM_BASE}/api/feed/list`, {
       headers: API_HEADERS,
