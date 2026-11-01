@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "com.tiktok.public",
   title: "TikTok",
-  version: "1.1.0",
+  version: "1.2.0",
   requiredVersion: "0.0.1",
   description: "TikTok 公开视频：热门列表、分享链接解析与动态播放资源",
   author: "OpenCode",
@@ -13,7 +13,21 @@ WidgetMetadata = {
       title: "TikTok Cookie（可选）",
       type: "input",
       value: "",
-      description: "用于账号推荐，仅发送至 www.tiktok.com。Cookie 属于敏感凭据，请勿分享。"
+      description: "用于账号推荐；默认仅发送至 www.tiktok.com，配置推荐服务后也会发送至该 HTTPS 服务。"
+    },
+    {
+      name: "recommendServer",
+      title: "推荐服务地址（可选）",
+      type: "input",
+      value: "",
+      description: "Playwright 推荐服务的 HTTPS 地址，例如 https://tiktok-api.example.com。"
+    },
+    {
+      name: "recommendToken",
+      title: "推荐服务令牌（可选）",
+      type: "input",
+      value: "",
+      description: "用于访问受保护的 Playwright 推荐服务，请勿分享。"
     }
   ],
   modules: [
@@ -460,12 +474,48 @@ async function fetchFreshItem(context) {
   }
 }
 
+function normalizeRecommendServer(value) {
+  const server = String(value || "").trim().replace(/\/+$/, "");
+  if (!server || server.length > 512 || /[\r\n\s]/.test(server) || !/^https:\/\//i.test(server)) return "";
+  return server;
+}
+
+async function fetchBackendRecommendations(cookie, server, token, language) {
+  const apiServer = normalizeRecommendServer(server);
+  const cleanToken = String(token || "").trim();
+  if (!apiServer || !cleanToken || /[\r\n]/.test(cleanToken)) return [];
+  const response = await Widget.http.post(`${apiServer}/v1/recommend`, {
+    cookie,
+    language,
+    limit: 12
+  }, {
+    headers: {
+      Authorization: `Bearer ${cleanToken}`,
+      "Content-Type": "application/json"
+    }
+  });
+  const body = getBody(response);
+  if (response && Number(response.statusCode) === 401) {
+    throw new Error("推荐服务令牌无效");
+  }
+  if (!body || !Array.isArray(body.items)) return [];
+  return body.items
+    .map(normalizeOfficialItem)
+    .filter(isPlayableVideo);
+}
+
 loadForYou = async function loadForYou(params = {}) {
   try {
     const cookie = normalizeCookie(params.cookie);
     if (!hasLoginCookie(cookie)) return [];
 
     const language = params.language === "zh-Hans" ? "zh-Hans" : "zh-Hant";
+    const backendItems = await fetchBackendRecommendations(cookie, params.recommendServer, params.recommendToken, language);
+    if (backendItems.length) {
+      backendItems.forEach(cacheItem);
+      return backendItems.map(toVideoItem).filter(Boolean);
+    }
+
     const response = await Widget.http.get(`${TIKTOK_BASE}/foryou`, {
       headers: buildTikTokHeaders(cookie),
       params: { lang: language }

@@ -1,3 +1,4 @@
 node_modules/
 dist/
 rex-widget-env.d.ts
+server/node_modules/

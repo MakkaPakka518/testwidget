@@ -141,6 +141,19 @@ global.Widget = {
       }
 
       throw new Error(`unmocked url: ${url}`);
+    },
+    post: async (url, body, options = {}) => {
+      calls.push({ url, body, options });
+      if (url === "https://recommend.example.com/v1/recommend") {
+        const payload = JSON.parse(forYouHtml().match(/<script[^>]*>([\s\S]*?)<\/script>/)[1]);
+        return {
+          statusCode: 200,
+          data: {
+            items: [payload.__DEFAULT_SCOPE__["webapp.foryou.video"].itemList[0]]
+          }
+        };
+      }
+      throw new Error(`unmocked post url: ${url}`);
     }
   }
 };
@@ -160,14 +173,24 @@ eval(fs.readFileSync(target, "utf8"));
 
   const recommendations = await loadForYou({
     cookie: "Cookie: sessionid=test-session; sid_tt=test-sid",
+    recommendServer: "https://recommend.example.com/",
+    recommendToken: "test-recommend-token",
     language: "zh-Hant"
   });
   assert.equal(recommendations.length, 1);
   assert.equal(recommendations[0].title, "账号推荐视频");
-  const forYouCall = calls.find((call) => call.url === "https://www.tiktok.com/foryou");
-  assert.equal(forYouCall.options.headers.Cookie, "sessionid=test-session; sid_tt=test-sid");
-  assert.equal(forYouCall.options.params.lang, "zh-Hant");
-  assert.ok(forYouCall.options.headers["User-Agent"].includes("Chrome/"));
+  const backendCall = calls.find((call) => call.url === "https://recommend.example.com/v1/recommend");
+  assert.equal(backendCall.body.cookie, "sessionid=test-session; sid_tt=test-sid");
+  assert.equal(backendCall.body.language, "zh-Hant");
+  assert.equal(backendCall.options.headers.Authorization, "Bearer test-recommend-token");
+
+  const beforeInsecureServer = calls.length;
+  await loadForYou({
+    cookie: "sessionid=test-session",
+    recommendServer: "http://127.0.0.1:3217",
+    recommendToken: "test-recommend-token"
+  });
+  assert.ok(!calls.slice(beforeInsecureServer).some((call) => call.url.startsWith("http://127.0.0.1")), "Cookie 不得通过 HTTP 发给后端");
 
   const unconfirmed = await loadForYou({ cookie: "sessionid=unconfirmed" });
   assert.equal(unconfirmed.length, 1, "SSR 有推荐数据时不应因缺少 user 字段而返回空列表");
