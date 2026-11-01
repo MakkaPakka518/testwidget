@@ -79,6 +79,38 @@ function officialHtml(id, username) {
   return `<html><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(hydration)}</script></html>`;
 }
 
+function forYouHtml(loginConfirmed = true) {
+  const hydration = {
+    __DEFAULT_SCOPE__: {
+      "webapp.app-context": loginConfirmed
+        ? { user: { id: "logged-in-user", uniqueId: "my.account" } }
+        : {},
+      "webapp.foryou.video": {
+        statusCode: 0,
+        itemList: [
+          {
+            id: "7777777777777777777",
+            desc: "账号推荐视频",
+            createTime: "1564234358",
+            author: {
+              uniqueId: "recommended.user",
+              nickname: "Recommended",
+              avatarMedium: "https://cdn.example/recommended-avatar.jpg"
+            },
+            stats: { playCount: 10, diggCount: 9, commentCount: 8, shareCount: 7 },
+            video: {
+              duration: 15,
+              cover: "https://cdn.example/recommended-cover.jpg",
+              playAddr: "https://cdn.example/recommended.mp4"
+            }
+          }
+        ]
+      }
+    }
+  };
+  return `<html><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(hydration)}</script></html>`;
+}
+
 global.Widget = {
   http: {
     get: async (url, options = {}) => {
@@ -86,6 +118,11 @@ global.Widget = {
 
       if (url.endsWith("/api/feed/list")) {
         return { data: { code: 0, msg: "success", data: [tikwmVideo(), photoPost()] } };
+      }
+
+      if (url === "https://www.tiktok.com/foryou") {
+        const cookie = String(options.headers && options.headers.Cookie || "");
+        return { data: forYouHtml(!cookie.includes("unconfirmed")) };
       }
 
       if (url.endsWith("/api/")) {
@@ -112,7 +149,31 @@ global.WidgetMetadata = {};
 eval(fs.readFileSync(target, "utf8"));
 
 (async () => {
-  const list = await loadPopular({ count: "20" });
+  const cookieParam = WidgetMetadata.globalParams.find((item) => item.name === "cookie");
+  assert.ok(cookieParam);
+  assert.equal(cookieParam.value, "");
+
+  const callsBeforeCookie = calls.length;
+  assert.deepEqual(await loadForYou({ cookie: "" }), []);
+  assert.deepEqual(await loadForYou({ cookie: "sessionid=test\ninjected" }), []);
+  assert.equal(calls.length, callsBeforeCookie, "缺失或含换行的 Cookie 不应发请求");
+
+  const recommendations = await loadForYou({
+    cookie: "Cookie: sessionid=test-session; sid_tt=test-sid",
+    language: "zh-Hant"
+  });
+  assert.equal(recommendations.length, 1);
+  assert.equal(recommendations[0].title, "账号推荐视频");
+  const forYouCall = calls.find((call) => call.url === "https://www.tiktok.com/foryou");
+  assert.equal(forYouCall.options.headers.Cookie, "sessionid=test-session; sid_tt=test-sid");
+  assert.equal(forYouCall.options.params.lang, "zh-Hant");
+  assert.ok(forYouCall.options.headers["User-Agent"].includes("Chrome/"));
+
+  const unconfirmed = await loadForYou({ cookie: "sessionid=unconfirmed" });
+  assert.equal(unconfirmed.length, 1, "SSR 有推荐数据时不应因缺少 user 字段而返回空列表");
+  assert.ok(unconfirmed[0].description.startsWith("登录状态未确认"));
+
+  const list = await loadPopular({ cookie: "sessionid=must-not-leak", count: "20" });
   assert.equal(list.length, 1, "图集音频不能作为视频返回");
   assert.equal(list[0].type, "url");
   assert.equal(list[0].id, "https://www.tiktok.com/@scout2015/video/6718335390845095173");
@@ -120,9 +181,12 @@ eval(fs.readFileSync(target, "utf8"));
   assert.equal(list[0].videoUrl, undefined, "列表不应缓存临时播放地址");
   assert.equal(list[0].headers, undefined, "VideoItem 不支持 headers 字段");
   assert.equal(list[0].poster_path, undefined, "原始 API 字段不能泄漏");
-  assert.equal(calls[0].options.params.region, "TW");
-  assert.equal(calls[0].options.params.count, "20");
-  const regionParam = WidgetMetadata.modules[0].params.find((item) => item.name === "region");
+  const feedCall = calls.find((call) => call.url.endsWith("/api/feed/list"));
+  assert.equal(feedCall.options.params.region, "TW");
+  assert.equal(feedCall.options.params.count, "20");
+  assert.equal(feedCall.options.headers.Cookie, undefined, "Cookie 不得发送给 TikWM");
+  const popularModule = WidgetMetadata.modules.find((item) => item.id === "loadPopular");
+  const regionParam = popularModule.params.find((item) => item.name === "region");
   assert.equal(regionParam.value, "TW");
   assert.ok(regionParam.enumOptions.some((item) => item.value === "HK"));
   assert.ok(regionParam.enumOptions.some((item) => item.value === "SG"));
@@ -168,6 +232,8 @@ eval(fs.readFileSync(target, "utf8"));
 
   const apiCalls = calls.filter((call) => call.url.endsWith("/api/"));
   assert.ok(apiCalls.every((call) => call.options.params && call.options.params.hd === "1"));
+  const thirdPartyCalls = calls.filter((call) => call.url.startsWith("https://www.tikwm.com/"));
+  assert.ok(thirdPartyCalls.every((call) => !call.options.headers.Cookie), "Cookie 不得发送给第三方");
   console.log("TikTok widget tests passed", { target, calls: calls.length });
 })().catch((error) => {
   console.error(error);

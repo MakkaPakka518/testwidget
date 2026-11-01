@@ -1,13 +1,43 @@
 WidgetMetadata = {
   id: "com.tiktok.public",
   title: "TikTok",
-  version: "1.0.0",
+  version: "1.1.0",
   requiredVersion: "0.0.1",
   description: "TikTok 公开视频：热门列表、分享链接解析与动态播放资源",
   author: "OpenCode",
   site: "https://www.tiktok.com",
   detailCacheDuration: 300,
+  globalParams: [
+    {
+      name: "cookie",
+      title: "TikTok Cookie（可选）",
+      type: "input",
+      value: "",
+      description: "用于账号推荐，仅发送至 www.tiktok.com。Cookie 属于敏感凭据，请勿分享。"
+    }
+  ],
   modules: [
+    {
+      id: "loadForYou",
+      title: "账号推荐",
+      description: "使用登录 Cookie 获取 TikTok For You 首屏推荐",
+      functionName: "loadForYou",
+      cacheDuration: 0,
+      requiresWebView: false,
+      sectionMode: false,
+      params: [
+        {
+          name: "language",
+          title: "界面语言",
+          type: "enumeration",
+          value: "zh-Hant",
+          enumOptions: [
+            { title: "繁体中文", value: "zh-Hant" },
+            { title: "简体中文", value: "zh-Hans" }
+          ]
+        }
+      ]
+    },
     {
       id: "loadPopular",
       title: "热门视频",
@@ -93,13 +123,14 @@ WidgetMetadata = {
 const TIKTOK_BASE = "https://www.tiktok.com";
 const TIKWM_BASE = "https://www.tikwm.com";
 const USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
+const WEB_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const TIKTOK_HOSTS = ["tiktok.com", "www.tiktok.com", "m.tiktok.com"];
 const TIKTOK_SHORT_HOSTS = ["vm.tiktok.com", "vt.tiktok.com"];
 const ITEM_CACHE_TTL_MS = 60 * 1000;
 const ITEM_CACHE = {};
 
 const TIKTOK_HEADERS = {
-  "User-Agent": USER_AGENT,
+  "User-Agent": WEB_USER_AGENT,
   Accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
   "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
   Referer: `${TIKTOK_BASE}/`
@@ -110,6 +141,23 @@ const API_HEADERS = {
   Accept: "application/json,text/plain,*/*",
   Referer: `${TIKWM_BASE}/`
 };
+
+function normalizeCookie(value) {
+  const cookie = String(value || "").trim().replace(/^cookie\s*:\s*/i, "").trim();
+  if (!cookie || cookie.length > 16384 || /[\r\n]/.test(cookie)) return "";
+  return cookie;
+}
+
+function hasLoginCookie(cookie) {
+  return /(?:^|;\s*)(?:sessionid|sessionid_ss)=[^;]+/i.test(cookie);
+}
+
+function buildTikTokHeaders(cookie = "") {
+  const headers = { ...TIKTOK_HEADERS };
+  const normalized = normalizeCookie(cookie);
+  if (normalized) headers.Cookie = normalized;
+  return headers;
+}
 
 function getBody(response) {
   let body = response && response.data !== undefined ? response.data : response;
@@ -382,7 +430,7 @@ async function fetchOfficialItem(context) {
   const url = buildCanonicalUrl(context.id, context.username);
   if (!url) return null;
 
-  const response = await Widget.http.get(url, { headers: TIKTOK_HEADERS });
+  const response = await Widget.http.get(url, { headers: buildTikTokHeaders() });
   const hydration = extractHydrationData(response && response.data);
   const scope = hydration && hydration.__DEFAULT_SCOPE__;
   const detail = scope && scope["webapp.video-detail"];
@@ -411,6 +459,42 @@ async function fetchFreshItem(context) {
     return null;
   }
 }
+
+loadForYou = async function loadForYou(params = {}) {
+  try {
+    const cookie = normalizeCookie(params.cookie);
+    if (!hasLoginCookie(cookie)) return [];
+
+    const language = params.language === "zh-Hans" ? "zh-Hans" : "zh-Hant";
+    const response = await Widget.http.get(`${TIKTOK_BASE}/foryou`, {
+      headers: buildTikTokHeaders(cookie),
+      params: { lang: language }
+    });
+    const hydration = extractHydrationData(response && response.data);
+    const scope = hydration && hydration.__DEFAULT_SCOPE__;
+    const appContext = scope && scope["webapp.app-context"];
+    const loginConfirmed = !!(appContext && appContext.user);
+    const forYou = scope && scope["webapp.foryou.video"];
+    const list = forYou && Array.isArray(forYou.itemList) ? forYou.itemList : [];
+    const items = list
+      .map(normalizeOfficialItem)
+      .filter(isPlayableVideo);
+    items.forEach(cacheItem);
+    const results = items
+      .map(toVideoItem)
+      .filter(Boolean);
+    if (!loginConfirmed) {
+      console.log("[TikTok loadForYou] Cookie 已发送，但响应未明确确认登录状态");
+      results.forEach((item) => {
+        item.description = `登录状态未确认 | ${item.description || ""}`;
+      });
+    }
+    return results;
+  } catch (error) {
+    console.error("[TikTok loadForYou] 失败:", error.message || error);
+    throw error;
+  }
+};
 
 loadPopular = async function loadPopular(params = {}) {
   try {
