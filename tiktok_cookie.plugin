@@ -1,11 +1,11 @@
 #!name = TikTok Cookie 获取
 #!desc = 获取自己账号的 TikTok Cookie，保存到本地并弹通知
-#!author = me
-#!homepage = 
-#!icon = 
+#!author = MakkaPakka518
+#!homepage = https://github.com/MakkaPakka518/testwidget
+#!icon =
 
 [Script]
-http-request ^https:\/\/[^\/]*\.(tiktok|tiktokv|byteoversea)\.com\/ script-path=tiktok_cookie.js, requires-body=false, timeout=10, tag=TikTokCookie
+http-request ^https:\/\/[^\/]*\.(tiktok|tiktokv|byteoversea)\.com\/ script-path=https://raw.githubusercontent.com/MakkaPakka518/testwidget/main/tiktok%20cookie.js, requires-body=false, timeout=10, tag=TikTokCookie
 
 [MitM]
 hostname = *.tiktok.com, *.tiktokv.com, *.byteoversea.com
