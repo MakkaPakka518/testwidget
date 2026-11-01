@@ -1,0 +1,11 @@
+#!name = Twitter Cookie 获取
+#!desc = 获取自己账号的 Twitter/X Cookie（auth_token、ct0），保存到本地并弹通知
+#!author = MakkaPakka518
+#!homepage = https://github.com/MakkaPakka518/testwidget
+#!icon =
+
+[Script]
+http-request ^https:\/\/([^\/]*\.)?(x|twitter)\.com\/ script-path=https://raw.githubusercontent.com/MakkaPakka518/testwidget/main/twitter_cookie.js, requires-body=false, timeout=10, tag=TwitterCookie
+
+[MitM]
+hostname = x.com, *.x.com, twitter.com, *.twitter.com
