@@ -7,8 +7,8 @@
     "build": "rslib build",
     "test": "npm run test:metadata && npm run test:widget && npm run build && npm run test:dist",
     "test:metadata": "tsx validate-metadata.mjs",
-    "test:widget": "node test-tiktok.cjs && node test-twitter.cjs",
-    "test:dist": "node test-tiktok.cjs ./dist/tiktok.js && node test-twitter.cjs ./dist/twitter.js"
+    "test:widget": "node test-tiktok.cjs && node test-twitter.cjs && node test-twitch.cjs",
+    "test:dist": "node test-tiktok.cjs ./dist/tiktok.js && node test-twitter.cjs ./dist/twitter.js && node test-twitch.cjs ./dist/twitch.js"
   },
   "devDependencies": {
     "@rexnow/libs": "3.1.3",

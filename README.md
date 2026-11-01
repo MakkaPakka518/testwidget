@@ -2,6 +2,14 @@
 
 ForwardWidget/rex 测试模块。
 
+## Twitch
+
+- 模块文件：[`widgets/twitch.js`](widgets/twitch.js)
+- 热门直播、热门分类、单频道、关键词/分类搜索，以及直播与 VOD 的 HLS 多清晰度播放。
+- 无需登录：使用 Twitch 网页公开 Client-ID 读取公开数据。
+- 播放地址带签名且有时效，在 `loadResource` 起播时实时获取，不写入列表缓存。
+- 受上游完整性校验限制，单次最多返回 30 条，不支持深分页。
+
 ## X / Twitter
 
 - 模块文件：[`widgets/twitter.js`](widgets/twitter.js)

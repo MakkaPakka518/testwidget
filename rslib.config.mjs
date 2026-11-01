@@ -5,7 +5,8 @@ export default defineConfig({
   source: {
     entry: {
       tiktok: "./widgets/tiktok.js",
-      twitter: "./widgets/twitter.js"
+      twitter: "./widgets/twitter.js",
+      twitch: "./widgets/twitch.js"
     }
   },
   lib: [
