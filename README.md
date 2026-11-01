@@ -2,6 +2,14 @@
 
 ForwardWidget/rex 测试模块。
 
+## 哔哩哔哩
+
+- 模块文件：[`widgets/bilibili.js`](widgets/bilibili.js)
+- 热门、排行榜（22 个分区）、关键词搜索、BV号/链接解析、UP 主投稿、DASH 多清晰度 + 独立音轨。
+- 无需登录即可浏览与播放；未登录上限 480P。填写含 `SESSDATA` 的 Cookie 可解锁 1080P+ 与会员内容。
+- UP 主投稿接口需要登录 Cookie，未登录时返回空列表而不是报错。
+- 多 P 视频自动生成分集列表。
+
 ## Twitch
 
 - 模块文件：[`widgets/twitch.js`](widgets/twitch.js)

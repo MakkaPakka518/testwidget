@@ -1,0 +1,727 @@
+WidgetMetadata = {
+  id: "com.bilibili.video",
+  title: "哔哩哔哩",
+  version: "1.0.0",
+  requiredVersion: "0.0.1",
+  description: "哔哩哔哩视频模块：热门、排行、搜索、UP 主、DASH/HLS 多清晰度播放",
+  author: "OpenCode",
+  site: "https://www.bilibili.com",
+  detailCacheDuration: 300,
+  globalParams: [
+    {
+      name: "cookie",
+      title: "B站 Cookie（可选）",
+      type: "input",
+      value: "",
+      description: "填写 SESSDATA 等 Cookie 可观看 1080P+ 与会员内容；留空只能看公开清晰度。"
+    }
+  ],
+  modules: [
+    {
+      id: "loadPopular",
+      title: "热门",
+      functionName: "loadPopular",
+      cacheDuration: 300,
+      requiresWebView: false,
+      sectionMode: false,
+      params: [
+        { name: "page", title: "页码", type: "page" },
+        { name: "count", title: "数量", type: "count", value: "20" }
+      ]
+    },
+    {
+      id: "loadRanking",
+      title: "排行榜",
+      functionName: "loadRanking",
+      cacheDuration: 300,
+      requiresWebView: false,
+      sectionMode: false,
+      params: [
+        {
+          name: "category",
+          title: "分区",
+          type: "enumeration",
+          value: "0",
+          enumOptions: [
+            { title: "全站", value: "0" },
+            { title: "动画", value: "1" },
+            { title: "番剧", value: "13" },
+            { title: "国创", value: "168" },
+            { title: "音乐", value: "3" },
+            { title: "舞蹈", value: "129" },
+            { title: "游戏", value: "4" },
+            { title: "知识", value: "36" },
+            { title: "科技", value: "188" },
+            { title: "运动", value: "234" },
+            { title: "汽车", value: "223" },
+            { title: "生活", value: "160" },
+            { title: "美食", value: "211" },
+            { title: "动物", value: "217" },
+            { title: "鬼畜", value: "119" },
+            { title: "时尚", value: "155" },
+            { title: "资讯", value: "202" },
+            { title: "娱乐", value: "5" },
+            { title: "影视", value: "181" },
+            { title: "纪录片", value: "177" },
+            { title: "电影", value: "23" },
+            { title: "电视剧", value: "11" }
+          ]
+        },
+        { name: "count", title: "数量", type: "count", value: "20" }
+      ]
+    },
+    {
+      id: "loadUploader",
+      title: "UP 主视频",
+      functionName: "loadUploader",
+      cacheDuration: 180,
+      requiresWebView: false,
+      sectionMode: false,
+      params: [
+        {
+          name: "mid",
+          title: "UP 主 UID 或主页链接",
+          type: "input",
+          value: "",
+          placeholders: [
+            { title: "影视飓风", value: "946974" }
+          ]
+        },
+        { name: "page", title: "页码", type: "page" },
+        { name: "count", title: "数量", type: "count", value: "20" }
+      ]
+    },
+    {
+      id: "loadResource",
+      title: "B站播放源",
+      functionName: "loadResource",
+      type: "stream",
+      cacheDuration: 0,
+      params: []
+    }
+  ],
+  search: {
+    title: "搜索视频",
+    functionName: "search",
+    params: [
+      { name: "keyword", title: "关键词、BV号或视频链接", type: "input" },
+      { name: "page", title: "页码", type: "page" },
+      { name: "count", title: "数量", type: "count", value: "20" }
+    ]
+  }
+};
+
+const API = "https://api.bilibili.com";
+const PASSPORT = "https://passport.bilibili.com";
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const REFERER = "https://www.bilibili.com/";
+const VIDEO_CACHE = {};
+const VIDEO_TTL = 5 * 60 * 1000;
+const BUVID_TTL = 6 * 60 * 60 * 1000;
+let buvidCache = null;
+
+function getBody(response) {
+  let body = response && response.data !== undefined ? response.data : response;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch (error) {
+      return null;
+    }
+  }
+  return body && typeof body === "object" ? body : null;
+}
+
+function normalizeCookie(value) {
+  const cookie = String(value || "").trim().replace(/^cookie\s*:\s*/i, "").trim();
+  if (!cookie || cookie.length > 8192 || /[\r\n]/.test(cookie)) return "";
+  return cookie;
+}
+
+function cookieHasLogin(cookie) {
+  return /(?:^|;\s*)SESSDATA=[^;]{8,}/i.test(cookie);
+}
+
+async function ensureBuvid() {
+  if (buvidCache && Date.now() - buvidCache.timestamp < BUVID_TTL) return buvidCache.value;
+  try {
+    const response = await Widget.http.get(`${API}/x/frontend/finger/spi`, {
+      headers: { "User-Agent": UA, Referer: REFERER }
+    });
+    const body = getBody(response);
+    const value = body && body.data && body.data.b_3 ? String(body.data.b_3) : "";
+    if (value) {
+      buvidCache = { value, timestamp: Date.now() };
+      return value;
+    }
+  } catch (error) {
+    console.log("[Bilibili] buvid 获取失败:", error.message || error);
+  }
+  return "";
+}
+
+const MIXIN_KEY_ENC_TAB = [
+  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+  33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
+  26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52
+];
+let wbiCache = null;
+const WBI_TTL = 60 * 60 * 1000;
+
+function md5(text) {
+  function cmn(q, a, b, x, s, t) {
+    a = (((a + q) | 0) + ((x + t) | 0)) | 0;
+    return (((a << s) | (a >>> (32 - s))) + b) | 0;
+  }
+  function ff(a, b, c, d, x, s, t) { return cmn((b & c) | (~b & d), a, b, x, s, t); }
+  function gg(a, b, c, d, x, s, t) { return cmn((b & d) | (c & ~d), a, b, x, s, t); }
+  function hh(a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); }
+  function ii(a, b, c, d, x, s, t) { return cmn(c ^ (b | ~d), a, b, x, s, t); }
+  function rol(n, c) { return (n << c) | (n >>> (32 - c)); }
+  function toWords(bytes) {
+    const words = [];
+    for (let i = 0; i < bytes.length * 8; i += 8) {
+      words[i >> 5] |= (bytes[i / 8] & 0xff) << (i % 32);
+    }
+    return words;
+  }
+  function toBytes(str) {
+    const bytes = [];
+    for (let i = 0; i < str.length; i += 1) {
+      const code = str.charCodeAt(i);
+      if (code < 0x80) bytes.push(code);
+      else if (code < 0x800) bytes.push(0xc0 | (code >> 6), 0x80 | (code & 63));
+      else bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+    }
+    return bytes;
+  }
+  const str = String(text);
+  const bytes = toBytes(str);
+  const bitLen = bytes.length * 8;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) bytes.push(0);
+  for (let i = 0; i < 8; i += 1) bytes.push((bitLen >>> (i * 8)) & 0xff);
+  const words = toWords(bytes);
+  let a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
+  for (let i = 0; i < words.length; i += 16) {
+    const olda = a, oldb = b, oldc = c, oldd = d;
+    a = ff(a, b, c, d, words[i], 7, -680876936);
+    d = ff(d, a, b, c, words[i + 1], 12, -389564586);
+    c = ff(c, d, a, b, words[i + 2], 17, 606105819);
+    b = ff(b, c, d, a, words[i + 3], 22, -1044525330);
+    a = ff(a, b, c, d, words[i + 4], 7, -176418897);
+    d = ff(d, a, b, c, words[i + 5], 12, 1200080426);
+    c = ff(c, d, a, b, words[i + 6], 17, -1473231341);
+    b = ff(b, c, d, a, words[i + 7], 22, -45705983);
+    a = ff(a, b, c, d, words[i + 8], 7, 1770035416);
+    d = ff(d, a, b, c, words[i + 9], 12, -1958414417);
+    c = ff(c, d, a, b, words[i + 10], 17, -42063);
+    b = ff(b, c, d, a, words[i + 11], 22, -1990404162);
+    a = ff(a, b, c, d, words[i + 12], 7, 1804603682);
+    d = ff(d, a, b, c, words[i + 13], 12, -40341101);
+    c = ff(c, d, a, b, words[i + 14], 17, -1502002290);
+    b = ff(b, c, d, a, words[i + 15], 22, 1236535329);
+    a = gg(a, b, c, d, words[i + 1], 5, -165796510);
+    d = gg(d, a, b, c, words[i + 6], 9, -1069501632);
+    c = gg(c, d, a, b, words[i + 11], 14, 643717713);
+    b = gg(b, c, d, a, words[i], 20, -373897302);
+    a = gg(a, b, c, d, words[i + 5], 5, -701558691);
+    d = gg(d, a, b, c, words[i + 10], 9, 38016083);
+    c = gg(c, d, a, b, words[i + 15], 14, -660478335);
+    b = gg(b, c, d, a, words[i + 4], 20, -405537848);
+    a = gg(a, b, c, d, words[i + 9], 5, 568446438);
+    d = gg(d, a, b, c, words[i + 14], 9, -1019803690);
+    c = gg(c, d, a, b, words[i + 3], 14, -187363961);
+    b = gg(b, c, d, a, words[i + 8], 20, 1163531501);
+    a = gg(a, b, c, d, words[i + 13], 5, -1444681467);
+    d = gg(d, a, b, c, words[i + 2], 9, -51403784);
+    c = gg(c, d, a, b, words[i + 7], 14, 1735328473);
+    b = gg(b, c, d, a, words[i + 12], 20, -1926607734);
+    a = hh(a, b, c, d, words[i + 5], 4, -378558);
+    d = hh(d, a, b, c, words[i + 8], 11, -2022574463);
+    c = hh(c, d, a, b, words[i + 11], 16, 1839030562);
+    b = hh(b, c, d, a, words[i + 14], 23, -35309556);
+    a = hh(a, b, c, d, words[i + 1], 4, -1530992060);
+    d = hh(d, a, b, c, words[i + 4], 11, 1272893353);
+    c = hh(c, d, a, b, words[i + 7], 16, -155497632);
+    b = hh(b, c, d, a, words[i + 10], 23, -1094730640);
+    a = hh(a, b, c, d, words[i + 13], 4, 681279174);
+    d = hh(d, a, b, c, words[i], 11, -358537222);
+    c = hh(c, d, a, b, words[i + 3], 16, -722521979);
+    b = hh(b, c, d, a, words[i + 6], 23, 76029189);
+    a = hh(a, b, c, d, words[i + 9], 4, -640364487);
+    d = hh(d, a, b, c, words[i + 12], 11, -421815835);
+    c = hh(c, d, a, b, words[i + 15], 16, 530742520);
+    b = hh(b, c, d, a, words[i + 2], 23, -995338651);
+    a = ii(a, b, c, d, words[i], 6, -198630844);
+    d = ii(d, a, b, c, words[i + 7], 10, 1126891415);
+    c = ii(c, d, a, b, words[i + 14], 15, -1416354905);
+    b = ii(b, c, d, a, words[i + 5], 21, -57434055);
+    a = ii(a, b, c, d, words[i + 12], 6, 1700485571);
+    d = ii(d, a, b, c, words[i + 3], 10, -1894986606);
+    c = ii(c, d, a, b, words[i + 10], 15, -1051523);
+    b = ii(b, c, d, a, words[i + 1], 21, -2054922799);
+    a = ii(a, b, c, d, words[i + 8], 6, 1873313359);
+    d = ii(d, a, b, c, words[i + 15], 10, -30611744);
+    c = ii(c, d, a, b, words[i + 6], 15, -1560198380);
+    b = ii(b, c, d, a, words[i + 13], 21, 1309151649);
+    a = ii(a, b, c, d, words[i + 4], 6, -145523070);
+    d = ii(d, a, b, c, words[i + 11], 10, -1120210379);
+    c = ii(c, d, a, b, words[i + 2], 15, 718787259);
+    b = ii(b, c, d, a, words[i + 9], 21, -343485551);
+    a = (a + olda) | 0; b = (b + oldb) | 0; c = (c + oldc) | 0; d = (d + oldd) | 0;
+  }
+  const hex = "0123456789abcdef";
+  let out = "";
+  [a, b, c, d].forEach((word) => {
+    for (let i = 0; i < 4; i += 1) {
+      const byte = (word >> (i * 8)) & 0xff;
+      out += hex[(byte >> 4) & 0xf] + hex[byte & 0xf];
+    }
+  });
+  return out;
+}
+
+async function ensureWbi(params) {
+  if (wbiCache && Date.now() - wbiCache.timestamp < WBI_TTL) return wbiCache.value;
+  const buvid = await ensureBuvid();
+  const cookie = normalizeCookie(params && params.cookie);
+  const cookieHeader = ["buvid3=" + (buvid || "0"), "b_nut=1", cookie].filter(Boolean).join("; ");
+  const response = await Widget.http.get(`${API}/x/web-interface/nav`, {
+    headers: { "User-Agent": UA, Referer: REFERER, Cookie: cookieHeader }
+  });
+  const body = getBody(response);
+  const wbi = body && body.data && body.data.wbi_img;
+  if (!wbi || !wbi.img_url || !wbi.sub_url) return "";
+  const imgKey = String(wbi.img_url).split("/").pop().split(".")[0];
+  const subKey = String(wbi.sub_url).split("/").pop().split(".")[0];
+  const raw = imgKey + subKey;
+  const mixin = MIXIN_KEY_ENC_TAB.map((index) => raw[index] || "").join("").slice(0, 32);
+  wbiCache = { value: mixin, timestamp: Date.now() };
+  return mixin;
+}
+
+function encodeQuery(pairs) {
+  return pairs.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
+}
+
+async function wbiSign(params, query) {
+  const mixin = await ensureWbi(params);
+  if (!mixin) return Object.fromEntries(Object.entries(query));
+  const withTs = Object.assign({}, query, { wts: Math.floor(Date.now() / 1000) });
+  const pairs = Object.keys(withTs)
+    .sort()
+    .map((key) => [key, String(withTs[key]).replace(/[!'()*]/g, "")]);
+  const wRid = md5(encodeQuery(pairs) + mixin);
+  return Object.assign(Object.fromEntries(pairs), { w_rid: wRid });
+}
+
+async function apiGet(params, path, query = {}, referer = REFERER) {
+  const buvid = await ensureBuvid();
+  const cookie = normalizeCookie(params && params.cookie);
+  const cookieHeader = ["buvid3=" + (buvid || "0"), "b_nut=1", cookie].filter(Boolean).join("; ");
+  const response = await Widget.http.get(`${API}${path}`, {
+    headers: {
+      "User-Agent": UA,
+      Referer: referer,
+      Origin: "https://www.bilibili.com",
+      Cookie: cookieHeader
+    },
+    params: Object.fromEntries(Object.entries(query).map(([k, v]) => [k, String(v)]))
+  });
+  const body = getBody(response);
+  if (!body) throw new Error("B站接口返回异常");
+  if (body.code !== 0) {
+    const error = new Error(body.message || body.msg || `B站接口错误 ${body.code}`);
+    error.code = body.code;
+    throw error;
+  }
+  return body.data;
+}
+
+function compactNumber(value) {
+  const number = Number(value || 0);
+  if (number >= 100000000) return `${(number / 100000000).toFixed(1)}亿`;
+  if (number >= 10000) return `${(number / 10000).toFixed(1)}万`;
+  return String(number);
+}
+
+function normalizeImageUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("//")) return `https:${raw}`;
+  return raw.replace(/^http:\/\//, "https://");
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const remain = total % 60;
+  return hours
+    ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remain).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(remain).padStart(2, "0")}`;
+}
+
+function formatDate(timestamp) {
+  const seconds = Number(timestamp || 0);
+  if (!seconds) return "";
+  const date = new Date(seconds * 1000);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function cleanBvid(value) {
+  const match = String(value || "").trim().match(/^(BV[0-9A-Za-z]{10})$/);
+  return match ? match[1] : "";
+}
+
+function cleanMid(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/(?:space\.bilibili\.com\/)?(\d{1,15})/);
+  return match ? match[1] : "";
+}
+
+function parseInternalLink(value) {
+  const raw = String(value || "").trim();
+  let match = raw.match(/^bili:bvid:(BV[0-9A-Za-z]{10})$/);
+  if (match) return { bvid: match[1], cid: 0 };
+  match = raw.match(/^bili:video:(BV[0-9A-Za-z]{10}):(\d+)$/);
+  if (match) return { bvid: match[1], cid: Number(match[2]) };
+  return null;
+}
+
+function parseBilibiliUrl(value) {
+  const raw = String(value || "").trim();
+  if (!/^https?:\/\/(?:www\.|m\.)?bilibili\.com\//i.test(raw)) return null;
+  const bv = raw.match(/(BV[0-9A-Za-z]{10})/);
+  if (!bv) return null;
+  const p = raw.match(/[?&]p=(\d+)/);
+  return { bvid: bv[1], page: p ? Math.max(1, Number(p[1])) : 1 };
+}
+
+function parseOwnedLink(value) {
+  return parseInternalLink(value) || parseBilibiliUrl(value);
+}
+
+function videoLink(bvid, cid = 0) {
+  const clean = cleanBvid(bvid);
+  if (!clean) return "";
+  return cid ? `bili:video:${clean}:${cid}` : `bili:bvid:${clean}`;
+}
+
+function toVideoItem(raw, page = 1) {
+  if (!raw) return null;
+  const bvid = cleanBvid(raw.bvid);
+  if (!bvid) return null;
+  const pic = normalizeImageUrl(raw.pic);
+  const owner = raw.owner || {};
+  const stat = raw.stat || {};
+  const pages = Array.isArray(raw.pages) ? raw.pages : [];
+  const target = pages[Math.min(page - 1, Math.max(0, pages.length - 1))] || null;
+  const durationSeconds = target ? Number(target.duration || 0) : Number(raw.duration || 0);
+  const item = {
+    id: `https://www.bilibili.com/video/${bvid}`,
+    type: "url",
+    title: String(raw.title || bvid),
+    coverUrl: pic,
+    posterPath: pic,
+    backdropPath: pic,
+    description: [
+      owner.name ? `${owner.name}` : "",
+      stat.view ? `播放：${compactNumber(stat.view)}` : "",
+      stat.danmaku ? `弹幕：${compactNumber(stat.danmaku)}` : "",
+      raw.tname || ""
+    ].filter(Boolean).join(" | "),
+    duration: durationSeconds,
+    durationText: formatDuration(durationSeconds),
+    releaseDate: formatDate(raw.pubdate),
+    link: videoLink(bvid, target && pages.length > 1 ? Number(target.cid || 0) : 0),
+    playerType: "app"
+  };
+  if (owner.mid) {
+    item.peoples = [{
+      id: String(owner.mid),
+      title: String(owner.name || owner.mid),
+      avatar: normalizeImageUrl(owner.face),
+      role: "UP主"
+    }];
+  }
+  if (pages.length > 1) {
+    item.episode = page;
+    item.episodeItems = pages.map((entry, index) => ({
+      id: `bili:video:${bvid}:${entry.cid}`,
+      type: "url",
+      title: String(entry.part || `P${index + 1}`),
+      episode: index + 1,
+      link: `bili:video:${bvid}:${entry.cid}`,
+      playerType: "app"
+    }));
+  }
+  if (raw.desc) item.description = `${item.description}\n${String(raw.desc).slice(0, 200)}`.trim();
+  return item;
+}
+
+function cacheVideo(raw) {
+  const bvid = cleanBvid(raw && raw.bvid);
+  if (!bvid) return raw;
+  VIDEO_CACHE[bvid] = { raw, timestamp: Date.now() };
+  return raw;
+}
+
+function getCachedVideo(bvid) {
+  const cached = VIDEO_CACHE[cleanBvid(bvid)];
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp >= VIDEO_TTL) {
+    delete VIDEO_CACHE[cleanBvid(bvid)];
+    return null;
+  }
+  return cached.raw;
+}
+
+async function fetchVideoView(params, bvid) {
+  const clean = cleanBvid(bvid);
+  if (!clean) return null;
+  const cached = getCachedVideo(clean);
+  if (cached) return cached;
+  const data = await apiGet(params, "/x/web-interface/view", { bvid: clean }, `https://www.bilibili.com/video/${clean}`);
+  if (!data || cleanBvid(data.bvid) !== clean) return null;
+  return cacheVideo(data);
+}
+
+loadPopular = async function loadPopular(params = {}) {
+  try {
+    const page = Math.max(1, Number(params.page || 1));
+    const count = Math.min(50, Math.max(1, Number(params.count || 20)));
+    const data = await apiGet(params, "/x/web-interface/popular", { ps: count, pn: page });
+    const list = Array.isArray(data && data.list) ? data.list : [];
+    return list.map((raw) => (cacheVideo(raw), toVideoItem(raw))).filter(Boolean);
+  } catch (error) {
+    console.error("[Bilibili loadPopular] 失败:", error.message || error);
+    throw error;
+  }
+};
+
+loadRanking = async function loadRanking(params = {}) {
+  try {
+    const count = Math.min(100, Math.max(1, Number(params.count || 20)));
+    const category = /^\d{1,6}$/.test(String(params.category || "0")) ? String(params.category || "0") : "0";
+    const data = await apiGet(params, "/x/web-interface/ranking/v2", { rid: category, type: "all" });
+    const list = Array.isArray(data && data.list) ? data.list : [];
+    return list.slice(0, count).map((raw) => (cacheVideo(raw), toVideoItem(raw))).filter(Boolean);
+  } catch (error) {
+    console.error("[Bilibili loadRanking] 失败:", error.message || error);
+    throw error;
+  }
+};
+
+loadUploader = async function loadUploader(params = {}) {
+  try {
+    const mid = cleanMid(params.mid || params.peopleId);
+    if (!mid) return [];
+    const page = Math.max(1, Number(params.page || 1));
+    const count = Math.min(50, Math.max(1, Number(params.count || 20)));
+    const signed = await wbiSign(params, {
+      mid,
+      pn: page,
+      ps: count,
+      order: "pubdate",
+      platform: "web",
+      web_location: 1550101
+    });
+    const data = await apiGet(params, "/x/space/wbi/arc/search", signed, `https://space.bilibili.com/${mid}/video`);
+    const list = data && data.list && Array.isArray(data.list.vlist) ? data.list.vlist : [];
+    return list.map((raw) => {
+      const shaped = {
+        bvid: raw.bvid,
+        title: raw.title,
+        pic: raw.pic,
+        owner: { mid, name: raw.author || "", face: "" },
+        stat: { view: raw.play, danmaku: raw.video_review },
+        duration: raw.length,
+        pubdate: raw.created,
+        tname: raw.typeid ? "" : "",
+        desc: raw.description || ""
+      };
+      return toVideoItem(shaped);
+    }).filter(Boolean);
+  } catch (error) {
+    if (error && (error.code === -352 || error.code === -101 || error.code === -403)) {
+      console.log("[Bilibili loadUploader] 需要登录 Cookie 才能读取 UP 主投稿");
+      return [];
+    }
+    console.error("[Bilibili loadUploader] 失败:", error.message || error);
+    throw error;
+  }
+};
+
+search = async function search(params = {}) {
+  try {
+    const keyword = String(params.keyword || "").trim();
+    if (!keyword) return [];
+    const owned = parseBilibiliUrl(keyword);
+    if (owned) {
+      const item = await loadDetail(videoLink(owned.bvid));
+      return item ? [item] : [];
+    }
+    if (cleanBvid(keyword)) {
+      const item = await loadDetail(videoLink(keyword));
+      return item ? [item] : [];
+    }
+    const page = Math.max(1, Number(params.page || 1));
+    const count = Math.min(50, Math.max(1, Number(params.count || 20)));
+    const data = await apiGet(params, "/x/web-interface/search/type", {
+      search_type: "video",
+      keyword,
+      page,
+      page_size: count
+    }, "https://search.bilibili.com/");
+    const list = Array.isArray(data && data.result) ? data.result : [];
+    return list.map((raw) => toVideoItem({
+      bvid: raw.bvid,
+      title: String(raw.title || "").replace(/<[^>]+>/g, ""),
+      pic: raw.pic,
+      owner: { mid: raw.mid, name: raw.author, face: "" },
+      stat: { view: raw.play, danmaku: raw.video_review },
+      duration: raw.duration,
+      pubdate: raw.pubdate,
+      tname: raw.typename,
+      desc: raw.description || ""
+    })).filter(Boolean);
+  } catch (error) {
+    console.error("[Bilibili search] 失败:", error.message || error);
+    throw error;
+  }
+};
+
+loadDetail = async function loadDetail(link) {
+  try {
+    const context = parseOwnedLink(link);
+    if (!context) return null;
+    const raw = await fetchVideoView({}, context.bvid);
+    if (!raw) return null;
+    let page = 1;
+    if (context.cid) {
+      const pages = Array.isArray(raw.pages) ? raw.pages : [];
+      const index = pages.findIndex((entry) => Number(entry.cid) === Number(context.cid));
+      page = index >= 0 ? index + 1 : 1;
+    } else if (context.page) {
+      page = context.page;
+    }
+    return toVideoItem(raw, page);
+  } catch (error) {
+    console.error("[Bilibili loadDetail] 失败:", error.message || error);
+    return null;
+  }
+};
+
+function pickQuality(list, prefer) {
+  const sorted = (Array.isArray(list) ? list : []).slice().sort((a, b) => Number(b.id) - Number(a.id));
+  if (!sorted.length) return null;
+  if (prefer) {
+    const exact = sorted.find((entry) => Number(entry.id) === Number(prefer));
+    if (exact) return exact;
+  }
+  return sorted[0];
+}
+
+function qualityName(id) {
+  const map = {
+    127: "8K", 126: "杜比视界", 125: "HDR", 120: "4K", 116: "1080P60",
+    112: "1080P+", 80: "1080P", 74: "720P60", 64: "720P", 32: "480P", 16: "360P", 6: "240P"
+  };
+  return map[Number(id)] || `${id}`;
+}
+
+loadResource = async function loadResource(params = {}) {
+  try {
+    let context = null;
+    if (params.link !== undefined && params.link !== null && String(params.link).trim()) {
+      context = parseOwnedLink(params.link);
+      if (!context) return [];
+    } else if (params.id !== undefined && params.id !== null && String(params.id).trim()) {
+      context = parseOwnedLink(params.id);
+      if (!context) return [];
+    } else {
+      return [];
+    }
+
+    const raw = await fetchVideoView(params, context.bvid);
+    if (!raw) return [];
+    const pages = Array.isArray(raw.pages) ? raw.pages : [];
+    let cid = Number(context.cid || 0);
+    if (!cid && pages.length) cid = Number(pages[0].cid || 0);
+    if (!cid && raw.cid) cid = Number(raw.cid);
+    if (!cid) return [];
+
+    const data = await apiGet(params, "/x/player/playurl", {
+      bvid: context.bvid,
+      cid,
+      qn: 127,
+      fnval: 4048,
+      fourk: 1,
+      fnver: 0
+    }, `https://www.bilibili.com/video/${context.bvid}`);
+
+    const headers = {
+      "User-Agent": UA,
+      Referer: `https://www.bilibili.com/video/${context.bvid}`,
+      Origin: "https://www.bilibili.com"
+    };
+    const resources = [];
+    const dash = data && data.dash;
+    if (dash && Array.isArray(dash.video) && dash.video.length) {
+      const audioList = Array.isArray(dash.audio) ? dash.audio : [];
+      const audio = pickQuality(audioList);
+      const seenQuality = new Set();
+      const videos = dash.video
+        .slice()
+        .sort((a, b) => (Number(b.id) - Number(a.id)) || (Number(b.bandwidth || 0) - Number(a.bandwidth || 0)))
+        .filter((video) => {
+          if (seenQuality.has(Number(video.id))) return false;
+          seenQuality.add(Number(video.id));
+          return true;
+        });
+      videos.forEach((video) => {
+        const videoUrl = String(video.baseUrl || "");
+        if (!/^https?:\/\//i.test(videoUrl)) return;
+        const sizeText = video.bandwidth ? `${(Number(video.bandwidth) / 1000).toFixed(0)} kbps` : "";
+        resources.push({
+          name: qualityName(video.id),
+          description: [sizeText, `cid:${cid}`].filter(Boolean).join(" | "),
+          url: videoUrl,
+          customHeaders: headers,
+          playerType: "app"
+        });
+      });
+      const audioUrl = audio ? String(audio.baseUrl || "") : "";
+      if (/^https?:\/\//i.test(audioUrl)) {
+        resources.push({
+          name: "音轨",
+          description: "DASH 独立音频轨，需播放器合并",
+          url: audioUrl,
+          customHeaders: headers,
+          playerType: "app"
+        });
+      }
+      if (resources.length) return resources;
+    }
+
+    const durl = data && Array.isArray(data.durl) ? data.durl : [];
+    durl.forEach((entry, index) => {
+      const url = String(entry && entry.url || "");
+      if (!/^https?:\/\//i.test(url)) return;
+      resources.push({
+        name: durl.length > 1 ? `分P${index + 1}` : qualityName(data.quality),
+        description: data.format || "",
+        url,
+        customHeaders: headers,
+        playerType: "app"
+      });
+    });
+    return resources;
+  } catch (error) {
+    console.error("[Bilibili loadResource] 失败:", error.message || error);
+    throw error;
+  }
+};
