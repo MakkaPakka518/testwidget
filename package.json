@@ -1,0 +1,20 @@
+{
+  "name": "testwidget",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rslib build",
+    "test": "npm run test:metadata && npm run test:widget && npm run build && npm run test:dist",
+    "test:metadata": "tsx validate-metadata.mjs",
+    "test:widget": "node test-tiktok.cjs",
+    "test:dist": "node test-tiktok.cjs ./dist/tiktok.js"
+  },
+  "devDependencies": {
+    "@rexnow/libs": "3.1.3",
+    "@rexnow/rslib-plugin": "3.1.3",
+    "@rslib/core": "1.0.5",
+    "tsx": "^4.20.6",
+    "zod": "^4.6.4"
+  }
+}
