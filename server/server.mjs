@@ -9,7 +9,7 @@ const API_TOKEN = String(process.env.API_TOKEN || "");
 const REQUEST_TIMEOUT_MS = 45000;
 const MAX_BODY_BYTES = 32768;
 const RATE_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT = 4;
+const RATE_LIMIT = 20;
 const WEB_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 if (API_TOKEN.length < 32) {
@@ -17,8 +17,11 @@ if (API_TOKEN.length < 32) {
 }
 
 const rateLimits = new Map();
-let busy = false;
+const responseCache = new Map();
+const inFlightRequests = new Map();
+let browserQueue = Promise.resolve();
 let browserPromise;
+let browserCloseTimer;
 
 function sendJson(response, status, body, extraHeaders = {}) {
   response.writeHead(status, {
@@ -53,6 +56,27 @@ function isRateLimited(request) {
   recent.push(now);
   rateLimits.set(key, recent);
   return false;
+}
+
+function scheduleBrowserRequest(key, task) {
+  const cached = responseCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.items);
+  if (cached) responseCache.delete(key);
+  if (inFlightRequests.has(key)) return inFlightRequests.get(key);
+
+  const run = browserQueue.then(task, task);
+  browserQueue = run.catch(() => {});
+  const tracked = run.then((items) => {
+    responseCache.set(key, {
+      items,
+      expiresAt: Date.now() + (items.length ? 60 * 1000 : 10 * 1000)
+    });
+    return items;
+  }).finally(() => {
+    inFlightRequests.delete(key);
+  });
+  inFlightRequests.set(key, tracked);
+  return tracked;
 }
 
 function readJson(request) {
@@ -183,6 +207,10 @@ function uniqueItems(items, limit) {
 }
 
 function getBrowser() {
+  if (browserCloseTimer) {
+    clearTimeout(browserCloseTimer);
+    browserCloseTimer = null;
+  }
   if (!browserPromise) {
     browserPromise = chromium.launch({
       headless: true,
@@ -190,6 +218,17 @@ function getBrowser() {
     });
   }
   return browserPromise;
+}
+
+function scheduleBrowserClose() {
+  if (browserCloseTimer) clearTimeout(browserCloseTimer);
+  browserCloseTimer = setTimeout(async () => {
+    const browser = await browserPromise?.catch(() => null);
+    browserPromise = null;
+    browserCloseTimer = null;
+    if (browser) await browser.close().catch(() => {});
+  }, 30 * 1000);
+  browserCloseTimer.unref();
 }
 
 async function collectRecommendations(cookie, language, limit) {
@@ -233,6 +272,7 @@ async function collectRecommendations(cookie, language, limit) {
     return uniqueItems(captured, limit);
   } finally {
     await context.close();
+    scheduleBrowserClose();
   }
 }
 
@@ -246,6 +286,8 @@ async function collectXListVideos(cookie, listUrl, limit) {
   });
   const statuses = [];
   const seen = new Set();
+  const pendingResponses = [];
+  const operations = new Set();
 
   function append(items) {
     items.forEach((item) => {
@@ -258,22 +300,35 @@ async function collectXListVideos(cookie, listUrl, limit) {
   try {
     await context.addCookies(toBrowserCookies(cookie, ".x.com"));
     const page = await context.newPage();
-    page.on("response", async (response) => {
+    page.on("response", (response) => {
       if (!response.url().includes("/graphql/")) return;
-      try {
-        append(extractGraphqlVideoStatuses(await response.json(), limit));
-      } catch (error) {
-        // Ignore unrelated and non-JSON GraphQL responses.
-      }
+      const operation = response.url().match(/\/graphql\/[^/]+\/([^?]+)/);
+      if (operation) operations.add(operation[1]);
+      const pending = response.json()
+        .then((payload) => append(extractGraphqlVideoStatuses(payload, limit)))
+        .catch(() => {});
+      pendingResponses.push(pending);
     });
     await page.goto(listUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
     for (let index = 0; index < 3 && statuses.length < limit; index += 1) {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
       await page.waitForTimeout(3500);
     }
+    await Promise.allSettled(pendingResponses);
+    let finalPath = "";
+    try {
+      finalPath = new URL(page.url()).pathname;
+    } catch (error) {}
+    console.log("x-list diagnostics", {
+      finalPath,
+      graphqlResponses: pendingResponses.length,
+      operations: Array.from(operations).slice(0, 8),
+      videos: statuses.length
+    });
     return statuses.slice(0, limit);
   } finally {
     await context.close();
+    scheduleBrowserClose();
   }
 }
 
@@ -297,11 +352,6 @@ const server = createServer(async (request, response) => {
     sendJson(response, 429, { error: "rate_limited" }, { "Retry-After": "60" });
     return;
   }
-  if (busy) {
-    sendJson(response, 429, { error: "busy" }, { "Retry-After": "10" });
-    return;
-  }
-
   let body;
   try {
     body = await readJson(request);
@@ -322,15 +372,17 @@ const server = createServer(async (request, response) => {
     sendJson(response, 400, { error: "invalid_list_url" });
     return;
   }
-  busy = true;
   const startedAt = Date.now();
 
   try {
-    const collector = isXListVideos
+    const cacheKey = createHash("sha256")
+      .update(`${isXListVideos ? "x-list" : "tiktok"}|${listUrl}|${language}|${limit}|${cookie}`)
+      .digest("hex");
+    const collector = () => isXListVideos
       ? collectXListVideos(cookie, listUrl, limit)
       : collectRecommendations(cookie, language, limit);
     const items = await Promise.race([
-      collector,
+      scheduleBrowserRequest(cacheKey, collector),
       new Promise((_, reject) => setTimeout(() => reject(new Error("request timed out")), REQUEST_TIMEOUT_MS))
     ]);
     console.log("browser request completed", { type: isXListVideos ? "x-list" : "tiktok", count: items.length, elapsedMs: Date.now() - startedAt });
@@ -338,8 +390,6 @@ const server = createServer(async (request, response) => {
   } catch (error) {
     console.error("recommendation request failed", { message: error.message, elapsedMs: Date.now() - startedAt });
     sendJson(response, 502, { error: "upstream_failed" });
-  } finally {
-    busy = false;
   }
 });
 
@@ -349,6 +399,7 @@ server.listen(PORT, HOST, () => {
 
 async function shutdown() {
   server.close();
+  if (browserCloseTimer) clearTimeout(browserCloseTimer);
   if (browserPromise) {
     const browser = await browserPromise.catch(() => null);
     if (browser) await browser.close();

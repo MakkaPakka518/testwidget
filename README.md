@@ -25,13 +25,13 @@ Cookie 是登录凭据，请仅在自己的设备中配置，不要提交到代�
 
 ## 推荐后端
 
-后端代码位于 [`server/`](server/)，需要 Node.js、Playwright Chromium 和以下环境变量：
+后端代码位于 [`server/`](server/)，香港机使用该目录的 Dockerfile 运行 Playwright Chromium headless shell。环境变量：
 
 ```ini
 HOST=0.0.0.0
 PORT=3217
 API_TOKEN=至少32位的随机令牌
-PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ```
 
 接口：
@@ -40,7 +40,7 @@ PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 - `POST /v1/recommend`：TikTok For You，使用 `Authorization: Bearer <token>`
 - `POST /v1/x-list-videos`：X List 视频，使用同一 Bearer Token
 
-当前 VPS Origin 为 `http://167.253.64.235:3217`。请先配置 Cloudflare HTTPS 反代，再把 HTTPS 地址和 Token 填入 rex 模块全局参数；不要通过明文 HTTP 发送 Cookie。
+当前香港机 Origin 为 `http://45.196.235.7:3217`。请先配置 Cloudflare HTTPS 反代，再把 HTTPS 地址和 Token 填入 rex 模块全局参数；不要通过明文 HTTP 发送 Cookie。原服务器上的浏览器服务、依赖和缓存已移除。
 
 安装依赖并运行 Rex 元数据校验及离线测试：
 

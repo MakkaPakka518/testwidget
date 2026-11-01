@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "com.x.video",
   title: "X / Twitter 视频",
-  version: "1.1.0",
+  version: "1.1.1",
   requiredVersion: "0.0.1",
   description: "X/Twitter 视频模块：List 聚合、用户视频、搜索、链接解析与多清晰度播放",
   author: "OpenCode",
@@ -363,6 +363,10 @@ loadListVideos = async function loadListVideos(params = {}) {
     if (response && Number(response.statusCode) === 401) throw new Error("浏览器服务令牌无效");
     return body && Array.isArray(body.items) ? mapVideoResults(body.items) : [];
   } catch (error) {
+    if (String(error && error.message || error).includes("429")) {
+      console.log("[X loadListVideos] 浏览器服务繁忙，请稍后刷新");
+      return [];
+    }
     console.error("[X loadListVideos] 失败:", error.message || error);
     throw error;
   }
