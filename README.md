@@ -2,6 +2,13 @@
 
 ForwardWidget/rex 测试模块。
 
+## X / Twitter
+
+- 模块文件：[`widgets/twitter.js`](widgets/twitter.js)
+- 仅返回含视频或 GIF 视频的推文，自动过滤纯文字和图片推文。
+- 支持用户视频列表、关键词视频搜索、`@用户`搜索、推文链接解析及多清晰度 MP4/HLS 播放。
+- 数据来自 FxTwitter v2 公共 API，不需要 X 登录 Cookie。
+
 ## TikTok
 
 - 模块文件：[`widgets/tiktok.js`](widgets/tiktok.js)

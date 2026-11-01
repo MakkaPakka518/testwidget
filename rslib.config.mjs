@@ -4,7 +4,8 @@ import { pluginRexWidget } from "@rexnow/rslib-plugin";
 export default defineConfig({
   source: {
     entry: {
-      tiktok: "./widgets/tiktok.js"
+      tiktok: "./widgets/tiktok.js",
+      twitter: "./widgets/twitter.js"
     }
   },
   lib: [
