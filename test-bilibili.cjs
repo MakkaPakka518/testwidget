@@ -38,11 +38,11 @@ const PLAYURL = {
   dash: {
     duration: 742,
     video: [
-      { id: 80, baseUrl: "https://upos.example/1080.m4s", bandwidth: 3000000 },
-      { id: 64, baseUrl: "https://upos.example/720.m4s", bandwidth: 1500000 }
+      { id: 80, baseUrl: "https://upos.example/1080.m4s", bandwidth: 3000000, codecs: "avc1.640033", width: 1920, height: 1080, frameRate: "30.000", SegmentBase: { Initialization: "0-900", indexRange: "901-3200" } },
+      { id: 64, baseUrl: "https://upos.example/720.m4s", bandwidth: 1500000, codecs: "avc1.64001f", width: 1280, height: 720, frameRate: "30.000", SegmentBase: { Initialization: "0-900", indexRange: "901-3100" } }
     ],
     audio: [
-      { id: 30280, baseUrl: "https://upos.example/audio.m4s", bandwidth: 128000 }
+      { id: 30280, baseUrl: "https://upos.example/audio.m4s", bandwidth: 128000, codecs: "mp4a.40.2", SegmentBase: { Initialization: "0-800", indexRange: "801-3000" } }
     ]
   }
 };
@@ -146,10 +146,8 @@ eval(fs.readFileSync(target, "utf8"));
   assert.equal(detail.episode, 2, "带 cid 的链接应定位到 P2");
 
   const resources = await loadResource({ link: "bili:video:BV1Nax16uEHm:43208346540" });
-  assert.equal(resources.length, 1, "优先使用单文件 MP4（音视频合并）");
-  assert.equal(resources[0].name, "720P");
-  assert.ok(resources[0].url.includes("merged.mp4"));
-  assert.ok(resources[0].description.includes("音视频已合并"));
+  assert.ok(resources.length >= 1, "默认 mpd 模式应返回资源");
+  assert.ok(resources[0].url.startsWith("data:application/dash+xml;base64,"), "默认应生成 MPD");
   assert.equal(resources[0].playerType, "app");
   const playCall = calls.find((c) => c.url.endsWith("/x/player/playurl"));
   assert.equal(playCall.options.params.cid, "43208346540");
@@ -191,6 +189,14 @@ eval(fs.readFileSync(target, "utf8"));
   assert.ok(arcProxy[0].options.params.url.includes("w_rid="), "必须带 WBI 签名");
 
   // 画质模式
+  const mpdMode = await loadResource({ ...loginParams, link: "bili:bvid:BV1Nax16uEHm", qualityMode: "mpd" });
+  assert.equal(mpdMode.length, 1, "mpd 模式只返回一条 MPD");
+  assert.ok(mpdMode[0].url.startsWith("data:application/dash+xml;base64,"), "应为 MPD data URL");
+  assert.ok(mpdMode[0].name.includes("1080P"), "MPD 应选最高清晰度");
+  const mpdXml = Buffer.from(mpdMode[0].url.split(",")[1], "base64").toString("utf8");
+  assert.ok(mpdXml.includes('contentType="video"'), "MPD 应含视频轨");
+  assert.ok(mpdXml.includes('contentType="audio"'), "MPD 应含音频轨");
+
   const mergedMode = await loadResource({ ...loginParams, link: "bili:bvid:BV1Nax16uEHm", qualityMode: "merged" });
   assert.equal(mergedMode.length, 1, "merged 模式只返回单文件");
   assert.ok(mergedMode[0].description.includes("音视频已合并"));

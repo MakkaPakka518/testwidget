@@ -33,12 +33,13 @@ WidgetMetadata = {
       name: "qualityMode",
       title: "画质模式",
       type: "enumeration",
-      value: "merged",
-      description: "合并模式最高 720P 但有声音；高清模式可到 1080P/4K，但需要播放器支持 DASH 音视频合并。",
+      value: "mpd",
+      description: "MPD 模式生成 DASH 清单，播放器自动合并音视频，可播 1080P/4K；单文件模式兼容性最好但清晰度受B站单文件格式限制。",
       enumOptions: [
-        { title: "720P 单文件（有声音，推荐）", value: "merged" },
-        { title: "最高画质 DASH（含独立音轨）", value: "dash" },
-        { title: "两者都列出", value: "both" }
+        { title: "MPD 合并播放（最高画质，推荐）", value: "mpd" },
+        { title: "单文件 MP4（兼容性最好）", value: "merged" },
+        { title: "DASH 分离轨（视频+音轨分开列）", value: "dash" },
+        { title: "全部列出", value: "both" }
       ]
     }
   ],
@@ -679,6 +680,156 @@ function qualityName(id) {
   return map[Number(id)] || `${id}`;
 }
 
+/* ------------------------------ DASH → MPD ------------------------------ */
+
+function escapeXml(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/** 是否是可免 Referer 的 CDN（实测 akamaized 系列不校验） */
+function isNoRefererCdn(url) {
+  return /akamaized\.net|akamai/i.test(String(url || ""));
+}
+
+function buildMpd({ duration, videos, audios }) {
+  if (!videos.length) return "";
+  const totalSeconds = Math.max(1, Math.ceil(Number(duration || 0)));
+  const durationIso = `PT${totalSeconds}S`;
+
+  const videoXml = videos.map((track, index) => {
+    const init = escapeXml(track.SegmentBase.Initialization || "");
+    const indexRange = escapeXml(track.SegmentBase.indexRange || "");
+    const bandwidth = Math.max(1, Math.round(Number(track.bandwidth || 1)));
+    const codecs = escapeXml(track.codecs || "avc1.64001f");
+    const width = Math.round(Number(track.width || 1920));
+    const height = Math.round(Number(track.height || 1080));
+    const frameRate = Number(String(track.frameRate || "30").split(".")[0]) || 30;
+    return [
+      `      <Representation id="v${index}" bandwidth="${bandwidth}" codecs="${codecs}" width="${width}" height="${height}" frameRate="${frameRate}">`,
+      `        <BaseURL>${escapeXml(track.baseUrl)}</BaseURL>`,
+      `        <SegmentBase indexRange="${indexRange}">`,
+      `          <Initialization range="${init}"/>`,
+      `        </SegmentBase>`,
+      `      </Representation>`
+    ].join("\n");
+  }).join("\n");
+
+  const audioXml = audios.map((track, index) => {
+    const init = escapeXml(track.SegmentBase.Initialization || "");
+    const indexRange = escapeXml(track.SegmentBase.indexRange || "");
+    const bandwidth = Math.max(1, Math.round(Number(track.bandwidth || 1)));
+    const codecs = escapeXml(track.codecs || "mp4a.40.2");
+    return [
+      `      <Representation id="a${index}" bandwidth="${bandwidth}" codecs="${codecs}">`,
+      `        <BaseURL>${escapeXml(track.baseUrl)}</BaseURL>`,
+      `        <SegmentBase indexRange="${indexRange}">`,
+      `          <Initialization range="${init}"/>`,
+      `        </SegmentBase>`,
+      `      </Representation>`
+    ].join("\n");
+  }).join("\n");
+
+  return [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" type="static" mediaPresentationDuration="${durationIso}" minBufferTime="PT1.5S">`,
+    `  <Period id="0" start="PT0S" duration="${durationIso}">`,
+    `    <AdaptationSet id="video" contentType="video" mimeType="video/mp4" subsegmentAlignment="true" startWithSAP="1" segmentAlignment="true">`,
+    videoXml,
+    `    </AdaptationSet>`,
+    audios.length
+      ? [`    <AdaptationSet id="audio" contentType="audio" mimeType="audio/mp4" subsegmentAlignment="true" startWithSAP="1">`, audioXml, `    </AdaptationSet>`].join("\n")
+      : "",
+    `  </Period>`,
+    `</MPD>`
+  ].filter(Boolean).join("\n");
+}
+
+function toBase64(text) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const str = String(text || "");
+  const bytes = [];
+  for (let i = 0; i < str.length; i += 1) {
+    const code = str.charCodeAt(i);
+    if (code < 0x80) bytes.push(code);
+    else if (code < 0x800) bytes.push(0xc0 | (code >> 6), 0x80 | (code & 63));
+    else bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 63), 0x80 | (code & 63));
+  }
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = bytes[i + 1];
+    const b2 = bytes[i + 2];
+    out += chars[b0 >> 2];
+    out += chars[((b0 & 3) << 4) | ((b1 === undefined ? 0 : b1) >> 4)];
+    out += b1 === undefined ? "=" : chars[((b1 & 15) << 2) | ((b2 === undefined ? 0 : b2) >> 6)];
+    out += b2 === undefined ? "=" : chars[b2 & 63];
+  }
+  return out;
+}
+
+function mpdToDataUrl(mpd) {
+  const xml = String(mpd || "");
+  if (!xml) return "";
+  return `data:application/dash+xml;base64,${toBase64(xml)}`;
+}
+
+/**
+ * 从 dash 数据挑选轨道并生成可直接播放的 MPD。
+ * 优先 avc1 视频（兼容性最广）与 aac 音频。
+ */
+function buildPlayableMpd(dash, referer) {
+  if (!dash || typeof dash !== "object") return null;
+  const allVideo = Array.isArray(dash.video) ? dash.video : [];
+  const allAudio = Array.isArray(dash.audio) ? dash.audio : [];
+  if (!allVideo.length) return null;
+
+  const usable = (track) => track && track.baseUrl && track.SegmentBase;
+  const byQuality = (a, b) => {
+    const areaA = Number(a.width || 0) * Number(a.height || 0);
+    const areaB = Number(b.width || 0) * Number(b.height || 0);
+    if (areaA !== areaB) return areaB - areaA;
+    return Number(b.bandwidth || 0) - Number(a.bandwidth || 0);
+  };
+
+  const avc = allVideo.filter((t) => usable(t) && /^avc1/i.test(t.codecs || "")).sort(byQuality);
+  const fallback = allVideo.filter(usable).sort(byQuality);
+  const videos = avc.length ? avc : fallback;
+  const aac = allAudio.filter((t) => usable(t) && /^mp4a/i.test(t.codecs || "")).sort((a, b) => Number(b.bandwidth || 0) - Number(a.bandwidth || 0));
+  const audios = aac.length ? aac : allAudio.filter(usable);
+
+  if (!videos.length) return null;
+
+  // 同清晰度只保留一条（B站 会为同一清晰度给多个编码）
+  const seen = new Set();
+  const dedupVideo = videos.filter((track) => {
+    const key = `${track.width}x${track.height}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const mpd = buildMpd({
+    duration: dash.duration,
+    videos: dedupVideo,
+    audios: audios.slice(0, 1)
+  });
+  if (!mpd) return null;
+
+  return {
+    mpd,
+    url: mpdToDataUrl(mpd),
+    bestHeight: Math.max(...dedupVideo.map((t) => Number(t.height || 0))),
+    noReferer: dedupVideo.every((t) => isNoRefererCdn(t.baseUrl)),
+    videoCount: dedupVideo.length,
+    audioCount: Math.min(1, audios.length)
+  };
+}
+
 loadResource = async function loadResource(params = {}) {
   try {
     let context = null;
@@ -707,13 +858,46 @@ loadResource = async function loadResource(params = {}) {
       Origin: "https://www.bilibili.com"
     };
 
-    const mode = ["merged", "dash", "both"].includes(String(params.qualityMode || ""))
+    const mode = ["mpd", "merged", "dash", "both"].includes(String(params.qualityMode || ""))
       ? String(params.qualityMode)
-      : "merged";
+      : "mpd";
     const mergedResources = [];
 
-    // 单文件 MP4：音视频已合并，最高 720P（B站 单文件格式上限）
-    if (mode !== "dash") {
+    // MPD：生成 DASH 清单，让播放器自行合并音视频（可到 1080P/4K）
+    if (mode === "mpd" || mode === "both") {
+      try {
+        const dashData = await apiGet(params, "/x/player/playurl", {
+          bvid: context.bvid,
+          cid,
+          qn: 127,
+          fnval: 4048,
+          fnver: 0,
+          fourk: 1
+        }, referer);
+        const mpd = buildPlayableMpd(dashData && dashData.dash, referer);
+        if (mpd && mpd.url) {
+          const mpdResource = {
+            name: mpd.bestHeight ? `${mpd.bestHeight}P MPD` : "MPD",
+            description: [
+              `cid:${cid}`,
+              "DASH 清单",
+              "音视频自动合并",
+              `${mpd.videoCount}视频轨/${mpd.audioCount}音频轨`
+            ].filter(Boolean).join(" | "),
+            url: mpd.url,
+            customHeaders: headers,
+            playerType: "app"
+          };
+          if (mode === "mpd") return [mpdResource];
+          mergedResources.push(mpdResource);
+        }
+      } catch (error) {
+        console.log("[Bilibili] MPD 生成失败，回退单文件:", error.message || error);
+      }
+    }
+
+    // 单文件 MP4：音视频已合并，清晰度受 B站 单文件格式限制（通常 720P~1080P）
+    if (mode === "merged" || mode === "both" || (mode === "mpd" && mergedResources.length === 0)) {
       const single = await apiGet(params, "/x/player/playurl", {
         bvid: context.bvid,
         cid,
@@ -784,7 +968,10 @@ loadResource = async function loadResource(params = {}) {
           playerType: "app"
         });
       }
-      if (resources.length) return mode === "both" ? mergedResources.concat(resources) : resources;
+      if (resources.length) {
+        if (mode === "both" || mode === "mpd") return mergedResources.concat(resources);
+        return resources;
+      }
     }
 
     const durl = data && Array.isArray(data.durl) ? data.durl : [];
