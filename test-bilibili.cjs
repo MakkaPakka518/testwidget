@@ -190,12 +190,14 @@ eval(fs.readFileSync(target, "utf8"));
 
   // 画质模式
   const mpdMode = await loadResource({ ...loginParams, link: "bili:bvid:BV1Nax16uEHm", qualityMode: "mpd" });
-  assert.equal(mpdMode.length, 1, "mpd 模式只返回一条 MPD");
-  assert.ok(mpdMode[0].url.startsWith("data:application/dash+xml;base64,"), "应为 MPD data URL");
-  assert.ok(mpdMode[0].name.includes("1080P"), "MPD 应选最高清晰度");
+  assert.equal(mpdMode.length, 2, "每个清晰度各返回一条 MPD");
+  assert.ok(mpdMode[0].name.includes("1080P"), "按清晰度降序排列");
+  assert.ok(mpdMode[1].name.includes("720P"));
+  assert.ok(mpdMode.every((r) => r.url.startsWith("data:application/dash+xml;base64,")), "都应为 MPD data URL");
   const mpdXml = Buffer.from(mpdMode[0].url.split(",")[1], "base64").toString("utf8");
   assert.ok(mpdXml.includes('contentType="video"'), "MPD 应含视频轨");
   assert.ok(mpdXml.includes('contentType="audio"'), "MPD 应含音频轨");
+  assert.ok(mpdXml.split('contentType="video"').length === 2, "单条 MPD 只含一个清晰度");
 
   const mergedMode = await loadResource({ ...loginParams, link: "bili:bvid:BV1Nax16uEHm", qualityMode: "merged" });
   assert.equal(mergedMode.length, 1, "merged 模式只返回单文件");

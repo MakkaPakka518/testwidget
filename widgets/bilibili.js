@@ -820,13 +820,31 @@ function buildPlayableMpd(dash, referer) {
   });
   if (!mpd) return null;
 
+  // 每个清晰度单独生成一条 MPD（含音频），避免只给最高画质导致无法播放
+  const audio = audios.slice(0, 1);
+  const variants = dedupVideo
+    .map((track) => {
+      const singleMpd = buildMpd({ duration: dash.duration, videos: [track], audios: audio });
+      if (!singleMpd) return null;
+      const height = Number(track.height || 0);
+      return {
+        mpd: singleMpd,
+        url: mpdToDataUrl(singleMpd),
+        height,
+        name: height ? `${height}P` : "AUTO",
+        noReferer: isNoRefererCdn(track.baseUrl)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.height - a.height);
+
+  if (!variants.length) return null;
+
   return {
-    mpd,
-    url: mpdToDataUrl(mpd),
-    bestHeight: Math.max(...dedupVideo.map((t) => Number(t.height || 0))),
-    noReferer: dedupVideo.every((t) => isNoRefererCdn(t.baseUrl)),
+    variants,
+    bestHeight: variants[0].height,
     videoCount: dedupVideo.length,
-    audioCount: Math.min(1, audios.length)
+    audioCount: audio.length
   };
 }
 
@@ -875,30 +893,30 @@ loadResource = async function loadResource(params = {}) {
           fourk: 1
         }, referer);
         const mpd = buildPlayableMpd(dashData && dashData.dash, referer);
-        if (mpd && mpd.url) {
-          const mpdResource = {
-            name: mpd.bestHeight ? `${mpd.bestHeight}P MPD` : "MPD",
+        if (mpd && mpd.variants && mpd.variants.length) {
+          const mpdResources = mpd.variants.map((variant) => ({
+            name: `${variant.name} MPD`,
             description: [
               `cid:${cid}`,
               "DASH 清单",
-              "音视频自动合并",
-              `${mpd.videoCount}视频轨/${mpd.audioCount}音频轨`
+              "音视频自动合并"
             ].filter(Boolean).join(" | "),
-            url: mpd.url,
+            url: variant.url,
             customHeaders: headers,
             playerType: "app"
-          };
-          if (mode === "mpd") return [mpdResource];
-          mergedResources.push(mpdResource);
+          }));
+          if (mode === "mpd") return mpdResources;
+          mergedResources.push(...mpdResources);
         }
       } catch (error) {
         console.log("[Bilibili] MPD 生成失败，回退单文件:", error.message || error);
       }
     }
 
-    // 单文件 MP4：音视频已合并，清晰度受 B站 单文件格式限制（通常 720P~1080P）
+    // 单文件 MP4：音视频已合并。逐个 qn 请求，把每个可用清晰度都作为独立资源返回，
+    // 避免只给出最高画质（未登录/非会员时最高画质可能无法播放）。
     if (mode === "merged" || mode === "both" || (mode === "mpd" && mergedResources.length === 0)) {
-      const single = await apiGet(params, "/x/player/playurl", {
+      const probe = await apiGet(params, "/x/player/playurl", {
         bvid: context.bvid,
         cid,
         qn: 127,
@@ -907,18 +925,42 @@ loadResource = async function loadResource(params = {}) {
         fourk: 1
       }, referer);
 
-      const singleList = single && Array.isArray(single.durl) ? single.durl : [];
-      singleList.forEach((entry, index) => {
-        const url = String(entry && entry.url || "");
-        if (!/^https?:\/\//i.test(url)) return;
-        mergedResources.push({
-          name: singleList.length > 1 ? `分P${index + 1} ${qualityName(single.quality)}` : qualityName(single.quality),
-          description: [single.format || "MP4", `cid:${cid}`, "音视频已合并"].filter(Boolean).join(" | "),
-          url,
-          customHeaders: headers,
-          playerType: "app"
+      const available = Array.isArray(probe && probe.support_formats)
+        ? probe.support_formats.map((item) => Number(item.quality)).filter((q) => Number.isFinite(q) && q > 0)
+        : [];
+      const targets = available.length ? available : [Number(probe && probe.quality) || 64];
+
+      const seenUrl = new Set();
+      for (const qn of targets.slice().sort((a, b) => b - a)) {
+        let single;
+        try {
+          single = await apiGet(params, "/x/player/playurl", {
+            bvid: context.bvid,
+            cid,
+            qn,
+            fnval: 1,
+            fnver: 0,
+            fourk: 1
+          }, referer);
+        } catch (error) {
+          continue;
+        }
+        const singleList = single && Array.isArray(single.durl) ? single.durl : [];
+        singleList.forEach((entry, index) => {
+          const url = String(entry && entry.url || "");
+          if (!/^https?:\/\//i.test(url) || seenUrl.has(url)) return;
+          seenUrl.add(url);
+          mergedResources.push({
+            name: singleList.length > 1
+              ? `分P${index + 1} ${qualityName(single.quality)}`
+              : qualityName(single.quality),
+            description: [single.format || "MP4", `cid:${cid}`, "音视频已合并"].filter(Boolean).join(" | "),
+            url,
+            customHeaders: headers,
+            playerType: "app"
+          });
         });
-      });
+      }
       if (mergedResources.length && mode === "merged") return mergedResources;
     }
 
