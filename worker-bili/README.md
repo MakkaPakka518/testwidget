@@ -8,6 +8,35 @@
 2. **按浏览器隔离**：每个访问者分配一个签名的 `bili_dev` HttpOnly Cookie，扫码票据和会话都绑定该设备。
    别人即使拿到你的 `qrcode_key` 也无法轮询，因为 `/api/poll` 会校验设备归属；`/api/session` 也只列出本设备的 key。
 
+## 关键：出口问题已解决（不需要代理）
+
+Workers 的 `fetch()` 出口 IP 被 B站 判定为 `-412`，但 `connect()` 打开的 TCP socket 走**另一组出口**，可以正常访问 B站。
+
+本项目用 `direct.js` 基于 `cloudflare:sockets` 手写 HTTP/1.1 over TLS，全部请求走 socket：
+
+| 方式 | `passport.bilibili.com` 结果 |
+|---|---|
+| `fetch()` | `-412 request was banned` |
+| `connect()` + TLS | `200 OK` |
+
+因此二维码、短信、播放等全部功能都能在纯 Cloudflare 上跑通，不需要 WARP、VPS 或任何外部中转。
+
+## 管理面板
+
+访问 `/admin`：
+
+- **首次访问**：设置管理员密码（之后需要用它登录）
+- 密码只存 **PBKDF2-SHA256（10 万次迭代）+ 16 字节随机盐**，数据库里没有任何明文
+- 登录态用 HMAC 签名 Cookie（HttpOnly + Secure + SameSite=Strict），12 小时过期
+- 连续失败 8 次锁定该 IP 15 分钟
+
+面板可配置 SOCKS5 代理链（可选，当前非必需）：
+
+- 只接受 `socks5://` / `socks5h://`
+- 代理 URL 用 **AES-GCM 加密**后存入 D1
+- 接口只返回脱敏形式（如 `socks5://1.2.3.4:1080`），**账号密码永不下发**
+- 支持在线测试连通性
+
 ## 部署
 
 ```bash

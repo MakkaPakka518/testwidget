@@ -1,6 +1,8 @@
 name = "bili-login"
 main = "worker.js"
-compatibility_date = "2025-01-01"
+compatibility_date = "2025-09-13"
+compatibility_flags = ["nodejs_compat"]
+keep_vars = true
 workers_dev = true
 
 # 1) wrangler d1 create bili-login
@@ -8,8 +10,13 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "bili-login"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "1a7f1ae2-a35a-4f74-8449-b0c2938eebfd"
 
 # 密钥通过 wrangler secret put 设置，不要写进本文件：
 #   ACCESS_SALT      >= 16 位随机串
 #   COOKIE_SECRET    >= 32 位随机串
+
+[[rules]]
+type = "ESModule"
+globs = ["**/*.js"]
+fallthrough = true
