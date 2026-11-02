@@ -28,6 +28,18 @@ WidgetMetadata = {
       type: "input",
       value: "",
       description: "备用方式。填写 SESSDATA 等 Cookie 可观看 1080P+ 与会员内容；配置登录服务后留空即可。"
+    },
+    {
+      name: "qualityMode",
+      title: "画质模式",
+      type: "enumeration",
+      value: "merged",
+      description: "合并模式最高 720P 但有声音；高清模式可到 1080P/4K，但需要播放器支持 DASH 音视频合并。",
+      enumOptions: [
+        { title: "720P 单文件（有声音，推荐）", value: "merged" },
+        { title: "最高画质 DASH（含独立音轨）", value: "dash" },
+        { title: "两者都列出", value: "both" }
+      ]
     }
   ],
   modules: [
@@ -695,31 +707,36 @@ loadResource = async function loadResource(params = {}) {
       Origin: "https://www.bilibili.com"
     };
 
-    // 优先 fnval=1 取单文件 MP4（音视频已合并），避免 DASH 分离轨导致无声
-    const single = await apiGet(params, "/x/player/playurl", {
-      bvid: context.bvid,
-      cid,
-      qn: 127,
-      fnval: 1,
-      fnver: 0,
-      fourk: 1
-    }, referer);
+    const mode = ["merged", "dash", "both"].includes(String(params.qualityMode || ""))
+      ? String(params.qualityMode)
+      : "merged";
+    const mergedResources = [];
 
-    const singleList = single && Array.isArray(single.durl) ? single.durl : [];
-    const singleResources = singleList
-      .map((entry, index) => {
+    // 单文件 MP4：音视频已合并，最高 720P（B站 单文件格式上限）
+    if (mode !== "dash") {
+      const single = await apiGet(params, "/x/player/playurl", {
+        bvid: context.bvid,
+        cid,
+        qn: 127,
+        fnval: 1,
+        fnver: 0,
+        fourk: 1
+      }, referer);
+
+      const singleList = single && Array.isArray(single.durl) ? single.durl : [];
+      singleList.forEach((entry, index) => {
         const url = String(entry && entry.url || "");
-        if (!/^https?:\/\//i.test(url)) return null;
-        return {
+        if (!/^https?:\/\//i.test(url)) return;
+        mergedResources.push({
           name: singleList.length > 1 ? `分P${index + 1} ${qualityName(single.quality)}` : qualityName(single.quality),
           description: [single.format || "MP4", `cid:${cid}`, "音视频已合并"].filter(Boolean).join(" | "),
           url,
           customHeaders: headers,
           playerType: "app"
-        };
-      })
-      .filter(Boolean);
-    if (singleResources.length) return singleResources;
+        });
+      });
+      if (mergedResources.length && mode === "merged") return mergedResources;
+    }
 
     // 回退：DASH 分离轨（部分视频无单文件格式）
     const data = await apiGet(params, "/x/player/playurl", {
@@ -767,7 +784,7 @@ loadResource = async function loadResource(params = {}) {
           playerType: "app"
         });
       }
-      if (resources.length) return resources;
+      if (resources.length) return mode === "both" ? mergedResources.concat(resources) : resources;
     }
 
     const durl = data && Array.isArray(data.durl) ? data.durl : [];
@@ -782,7 +799,7 @@ loadResource = async function loadResource(params = {}) {
         playerType: "app"
       });
     });
-    return resources;
+    return mergedResources.concat(resources);
   } catch (error) {
     console.error("[Bilibili loadResource] 失败:", error.message || error);
     throw error;

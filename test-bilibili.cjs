@@ -190,6 +190,18 @@ eval(fs.readFileSync(target, "utf8"));
   assert.ok(arcProxy.length > 0, "UP 主请求需走登录服务");
   assert.ok(arcProxy[0].options.params.url.includes("w_rid="), "必须带 WBI 签名");
 
+  // 画质模式
+  const mergedMode = await loadResource({ ...loginParams, link: "bili:bvid:BV1Nax16uEHm", qualityMode: "merged" });
+  assert.equal(mergedMode.length, 1, "merged 模式只返回单文件");
+  assert.ok(mergedMode[0].description.includes("音视频已合并"));
+
+  const dashMode = await loadResource({ ...loginParams, link: "bili:bvid:BV1Nax16uEHm", qualityMode: "dash" });
+  assert.ok(dashMode.some((r) => r.name === "1080P"), "dash 模式应含 1080P");
+  assert.ok(dashMode.some((r) => r.name === "音轨"), "dash 模式应含独立音轨");
+
+  const bothMode = await loadResource({ ...loginParams, link: "bili:bvid:BV1Nax16uEHm", qualityMode: "both" });
+  assert.ok(bothMode.length > dashMode.length, "both 模式应同时包含两种");
+
   const beforeInsecure = proxyCalls.length;
   await loadResource({ loginServer: "http://insecure.example", loginKey: loginParams.loginKey, link: "bili:bvid:BV1Nax16uEHm" });
   assert.equal(proxyCalls.length, beforeInsecure, "非 HTTPS 地址不得走登录服务");
