@@ -117,6 +117,11 @@ global.WidgetMetadata = {};
 eval(fs.readFileSync(target, "utf8"));
 
 (async () => {
+  const crypto = require("crypto");
+  for (const sample of ["abc", "", "hello world", "中文测试", "a=1&b=2"]) {
+    assert.equal(md5(sample), crypto.createHash("md5").update(sample).digest("hex"), `MD5 错误: ${sample}`);
+  }
+
   const popular = await loadPopular({ count: "20" });
   assert.equal(popular.length, 1);
   assert.equal(popular[0].type, "url");
