@@ -47,6 +47,15 @@ Cookie 是登录凭据，请仅在自己的设备中配置，不要提交到代�
 
 推荐后端不会持久化或记录 Cookie，但 Cookie 会在请求期间发送到该 VPS。接口使用 Bearer Token、频率限制和单浏览器并发保护。
 
+## 抖音
+
+- 模块文件：[`widgets/douyin.js`](widgets/douyin.js)
+- 在 Auth/WebView 中打开 `https://creator.douyin.com`，扫码登录后复制完整 Cookie，填入模块的“抖音 Creator Cookie”。
+- “我的作品”使用 Creator 接口获取当前账号发布的视频，支持游标翻页。
+- 播放时优先使用 `play_addr_h264.uri` 动态生成官方 `/aweme/v1/play/` 地址，并过滤 H.265 线路提高兼容性。
+- Cookie 只发送给 `creator.douyin.com`，不会发送给视频 CDN。
+- 喜欢、收藏、关注、搜索暂未提供：这些网页接口目前还需要实时 `a_bogus` 与 WebSign，只有 Cookie 不足以稳定调用。
+
 ## 扫码登录 Worker
 
 [`worker-bili/`](worker-bili/) 是一个独立 Cloudflare Worker，用 D1 存储、按浏览器隔离：
