@@ -350,11 +350,13 @@ function loginSession(params) {
 async function proxyRequest(params, path, query = {}, referer = REFERER) {
   const session = loginSession(params);
   if (!session) return null;
-  const target = new URL(`${API}${path}`);
-  Object.entries(query).forEach(([name, value]) => target.searchParams.set(name, String(value)));
+  const queryPairs = Object.keys(query || {})
+    .filter((name) => query[name] !== undefined && query[name] !== null)
+    .map((name) => `${encodeURIComponent(name)}=${encodeURIComponent(String(query[name]))}`);
+  const target = `${API}${path}${queryPairs.length ? `?${queryPairs.join("&")}` : ""}`;
   const response = await Widget.http.get(`${session.server}/api/proxy`, {
     headers: { "X-Bili-Key": session.key, Referer: REFERER },
-    params: { url: target.toString() }
+    params: { url: target }
   });
   const body = getBody(response);
   if (!body) throw new Error("登录服务返回异常");
