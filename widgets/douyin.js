@@ -3,7 +3,7 @@ WidgetMetadata = {
   title: "抖音",
   version: "1.0.0",
   requiredVersion: "0.0.1",
-  description: "使用 Creator 登录 Cookie 获取我的作品，并提供相关推荐与官方动态播放地址",
+  description: "使用 Creator 登录 Cookie 获取我的作品，并提供详情与官方动态播放地址",
   author: "MakkaPakka",
   site: "https://creator.douyin.com",
   detailCacheDuration: 300,
@@ -28,27 +28,6 @@ WidgetMetadata = {
       params: [
         { name: "page", title: "页码", type: "page" },
         { name: "count", title: "数量", type: "count", value: "18" }
-      ]
-    },
-    {
-      id: "loadRelated",
-      title: "相关推荐",
-      description: "根据抖音视频 ID 获取一批相关推荐",
-      functionName: "loadRelated",
-      cacheDuration: 120,
-      requiresWebView: false,
-      sectionMode: false,
-      params: [
-        {
-          name: "awemeId",
-          title: "视频 ID 或链接",
-          type: "input",
-          placeholders: [
-            { title: "抖音视频 ID", value: "7677873898611989236" },
-            { title: "抖音视频链接", value: "https://www.douyin.com/video/7677873898611989236" }
-          ]
-        },
-        { name: "count", title: "数量", type: "count", value: "10" }
       ]
     },
     {
@@ -85,15 +64,6 @@ function creatorHeaders(cookie, referer) {
     Accept: "application/json, text/plain, */*",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     Referer: referer
-  };
-}
-
-function publicHeaders() {
-  return {
-    "User-Agent": USER_AGENT,
-    Accept: "application/json, text/plain, */*",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    Referer: DOUYIN_BASE + "/"
   };
 }
 
@@ -137,13 +107,6 @@ function formatDuration(seconds) {
   var minutes = Math.floor(total / 60);
   var remain = Math.floor(total % 60);
   return String(minutes).padStart(2, "0") + ":" + String(remain).padStart(2, "0");
-}
-
-function parseAwemeId(value) {
-  var raw = String(value || "").trim();
-  if (/^\d{10,25}$/.test(raw)) return raw;
-  var match = raw.match(/^https?:\/\/(?:www\.)?douyin\.com\/video\/(\d{10,25})(?:[/?#].*)?$/i);
-  return match ? match[1] : "";
 }
 
 function parseOwnedLink(value) {
