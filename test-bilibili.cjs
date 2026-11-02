@@ -21,6 +21,16 @@ const VIEW = {
   ]
 };
 
+const VIEW_NAV = {
+  isLogin: true,
+  uname: "影视飓风",
+  mid: 946974,
+  wbi_img: {
+    img_url: "https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png",
+    sub_url: "https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png"
+  }
+};
+
 const PLAYURL = {
   quality: 64,
   format: "flv720",
@@ -53,7 +63,17 @@ global.Widget = {
           if (bvid !== VIEW.bvid) return { data: { code: -404, message: "啥都木有" } };
           return ok(VIEW);
         }
-        if (target.pathname === "/x/player/playurl") return ok(PLAYURL);
+        if (target.pathname === "/x/space/wbi/arc/search") {
+          if (!target.searchParams.get("w_rid")) return { data: { code: -352, message: "风控校验失败" } };
+          return ok({ list: { vlist: [{ bvid: VIEW.bvid, title: "登录投稿", pic: "//x.jpg", author: "UP", play: 1, video_review: 1, length: "01:00", created: 1793443764, description: "" }] } });
+        }
+        if (target.pathname === "/x/web-interface/nav") return ok(VIEW_NAV);
+        if (target.pathname === "/x/player/playurl") {
+          if (String(target.searchParams.get("fnval")) === "1") {
+            return ok({ quality: 64, format: "mp4720", durl: [{ url: "https://upos.example/merged.mp4" }] });
+          }
+          return ok(PLAYURL);
+        }
         if (target.pathname === "/x/web-interface/popular") return ok({ list: [VIEW] });
         return { data: { code: 0, data: {} } };
       }
@@ -78,6 +98,14 @@ global.Widget = {
         return ok({ list: { vlist: [{ bvid: VIEW.bvid, title: "投稿视频", pic: "//x.jpg", author: "UP", play: 10, video_review: 1, length: "10:00", created: 1793443764, description: "" }] } });
       }
       if (url.endsWith("/x/player/playurl")) {
+        const fnval = String(options.params && options.params.fnval || "");
+        if (fnval === "1") {
+          return ok({
+            quality: 64,
+            format: "mp4720",
+            durl: [{ url: "https://upos.example/merged.mp4", size: 1000 }]
+          });
+        }
         return ok(PLAYURL);
       }
       throw new Error("unmocked url " + url);
@@ -113,10 +141,10 @@ eval(fs.readFileSync(target, "utf8"));
   assert.equal(detail.episode, 2, "带 cid 的链接应定位到 P2");
 
   const resources = await loadResource({ link: "bili:video:BV1Nax16uEHm:43208346540" });
-  assert.equal(resources.length, 3, "2 视频轨去重 + 1 音轨");
-  assert.equal(resources[0].name, "1080P");
-  assert.equal(resources[1].name, "720P");
-  assert.equal(resources[2].name, "音轨");
+  assert.equal(resources.length, 1, "优先使用单文件 MP4（音视频合并）");
+  assert.equal(resources[0].name, "720P");
+  assert.ok(resources[0].url.includes("merged.mp4"));
+  assert.ok(resources[0].description.includes("音视频已合并"));
   assert.equal(resources[0].playerType, "app");
   const playCall = calls.find((c) => c.url.endsWith("/x/player/playurl"));
   assert.equal(playCall.options.params.cid, "43208346540");
@@ -148,8 +176,14 @@ eval(fs.readFileSync(target, "utf8"));
   assert.ok(loginDetail, "详情应可解析");
 
   const loginRes = await loadResource({ ...loginParams, link: "bili:bvid:BV1Nax16uEHm" });
-  assert.ok(loginRes.length >= 2, "登录模式应取到播放线路");
+  assert.ok(loginRes.length >= 1, "登录模式应取到播放线路");
   assert.ok(proxyCalls.some((u) => u.includes("/x/player/playurl")), "播放地址需走代理");
+
+  const loginUploader = await loadUploader({ ...loginParams, mid: "946974", count: "5" });
+  assert.equal(loginUploader.length, 1, "登录服务下 UP 主投稿应可取到");
+  const arcProxy = calls.filter((c) => c.url.includes("/api/proxy") && c.options.params.url.includes("arc/search"));
+  assert.ok(arcProxy.length > 0, "UP 主请求需走登录服务");
+  assert.ok(arcProxy[0].options.params.url.includes("w_rid="), "必须带 WBI 签名");
 
   const beforeInsecure = proxyCalls.length;
   await loadResource({ loginServer: "http://insecure.example", loginKey: loginParams.loginKey, link: "bili:bvid:BV1Nax16uEHm" });

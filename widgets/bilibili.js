@@ -298,14 +298,15 @@ function md5(text) {
 
 async function ensureWbi(params) {
   if (wbiCache && Date.now() - wbiCache.timestamp < WBI_TTL) return wbiCache.value;
-  const buvid = await ensureBuvid();
-  const cookie = normalizeCookie(params && params.cookie);
-  const cookieHeader = ["buvid3=" + (buvid || "0"), "b_nut=1", cookie].filter(Boolean).join("; ");
-  const response = await Widget.http.get(`${API}/x/web-interface/nav`, {
-    headers: { "User-Agent": UA, Referer: REFERER, Cookie: cookieHeader }
-  });
-  const body = getBody(response);
-  const wbi = body && body.data && body.data.wbi_img;
+  let data;
+  try {
+    // 走 apiGet，确保通过登录服务 / 正确出口，避免直连被 -412 拦截
+    data = await apiGet(params, "/x/web-interface/nav", {}, REFERER, { allowCodes: [-101] });
+  } catch (error) {
+    console.log("[Bilibili] WBI 密钥获取失败:", error.message || error);
+    return "";
+  }
+  const wbi = data && data.wbi_img;
   if (!wbi || !wbi.img_url || !wbi.sub_url) return "";
   const imgKey = String(wbi.img_url).split("/").pop().split(".")[0];
   const subKey = String(wbi.sub_url).split("/").pop().split(".")[0];
@@ -347,7 +348,7 @@ function loginSession(params) {
   return server && key ? { server, key } : null;
 }
 
-async function proxyRequest(params, path, query = {}, referer = REFERER) {
+async function proxyRequest(params, path, query = {}, referer = REFERER, options = {}) {
   const session = loginSession(params);
   if (!session) return null;
   const queryPairs = Object.keys(query || {})
@@ -360,7 +361,8 @@ async function proxyRequest(params, path, query = {}, referer = REFERER) {
   });
   const body = getBody(response);
   if (!body) throw new Error("登录服务返回异常");
-  if (body.code !== 0) {
+  const allowCodes = Array.isArray(options.allowCodes) ? options.allowCodes : [];
+  if (body.code !== 0 && !allowCodes.includes(Number(body.code))) {
     const error = new Error(body.message || body.msg || `B站接口错误 ${body.code}`);
     error.code = body.code;
     throw error;
@@ -368,9 +370,9 @@ async function proxyRequest(params, path, query = {}, referer = REFERER) {
   return body.data;
 }
 
-async function apiGet(params, path, query = {}, referer = REFERER) {
+async function apiGet(params, path, query = {}, referer = REFERER, options = {}) {
   if (loginSession(params)) {
-    return proxyRequest(params, path, query, referer);
+    return proxyRequest(params, path, query, referer, options);
   }
   const buvid = await ensureBuvid();
   const cookie = normalizeCookie(params && params.cookie);
@@ -386,7 +388,8 @@ async function apiGet(params, path, query = {}, referer = REFERER) {
   });
   const body = getBody(response);
   if (!body) throw new Error("B站接口返回异常");
-  if (body.code !== 0) {
+  const allowCodes = Array.isArray(options.allowCodes) ? options.allowCodes : [];
+  if (body.code !== 0 && !allowCodes.includes(Number(body.code))) {
     const error = new Error(body.message || body.msg || `B站接口错误 ${body.code}`);
     error.code = body.code;
     throw error;
@@ -709,6 +712,40 @@ loadResource = async function loadResource(params = {}) {
     if (!cid && raw.cid) cid = Number(raw.cid);
     if (!cid) return [];
 
+    const referer = `https://www.bilibili.com/video/${context.bvid}`;
+    const headers = {
+      "User-Agent": UA,
+      Referer: referer,
+      Origin: "https://www.bilibili.com"
+    };
+
+    // 优先 fnval=1 取单文件 MP4（音视频已合并），避免 DASH 分离轨导致无声
+    const single = await apiGet(params, "/x/player/playurl", {
+      bvid: context.bvid,
+      cid,
+      qn: 127,
+      fnval: 1,
+      fnver: 0,
+      fourk: 1
+    }, referer);
+
+    const singleList = single && Array.isArray(single.durl) ? single.durl : [];
+    const singleResources = singleList
+      .map((entry, index) => {
+        const url = String(entry && entry.url || "");
+        if (!/^https?:\/\//i.test(url)) return null;
+        return {
+          name: singleList.length > 1 ? `分P${index + 1} ${qualityName(single.quality)}` : qualityName(single.quality),
+          description: [single.format || "MP4", `cid:${cid}`, "音视频已合并"].filter(Boolean).join(" | "),
+          url,
+          customHeaders: headers,
+          playerType: "app"
+        };
+      })
+      .filter(Boolean);
+    if (singleResources.length) return singleResources;
+
+    // 回退：DASH 分离轨（部分视频无单文件格式）
     const data = await apiGet(params, "/x/player/playurl", {
       bvid: context.bvid,
       cid,
@@ -716,13 +753,8 @@ loadResource = async function loadResource(params = {}) {
       fnval: 4048,
       fourk: 1,
       fnver: 0
-    }, `https://www.bilibili.com/video/${context.bvid}`);
+    }, referer);
 
-    const headers = {
-      "User-Agent": UA,
-      Referer: `https://www.bilibili.com/video/${context.bvid}`,
-      Origin: "https://www.bilibili.com"
-    };
     const resources = [];
     const dash = data && data.dash;
     if (dash && Array.isArray(dash.video) && dash.video.length) {
