@@ -7,6 +7,7 @@ export default defineConfig({
       tiktok: "./widgets/tiktok.js",
       twitter: "./widgets/twitter.js",
       twitch: "./widgets/twitch.js",
+      flixpatrol: "./widgets/flixpatrol.js",
       bilibili: "./widgets/bilibili.js",
       douyin: "./widgets/douyin.js"
     }
