@@ -31,17 +31,13 @@ WidgetMetadata = {
           value: "united-states",
           description: "可输入 List 索引中的主流国家/地区 slug",
           placeholders: [
+            { title: "全球", value: "world" },
             { title: "美国", value: "united-states" },
-            { title: "英国", value: "united-kingdom" },
-            { title: "加拿大", value: "canada" },
-            { title: "香港", value: "hong-kong" },
             { title: "台湾", value: "taiwan" },
+            { title: "香港", value: "hong-kong" },
             { title: "日本", value: "japan" },
             { title: "韩国", value: "south-korea" },
             { title: "新加坡", value: "singapore" },
-            { title: "马来西亚", value: "malaysia" },
-            { title: "西班牙", value: "spain" },
-            { title: "尼日利亚", value: "nigeria" }
           ]
         },
         {
