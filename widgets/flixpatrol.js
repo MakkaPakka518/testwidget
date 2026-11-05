@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "makka.flixpatrol.top10",
   title: "FlixPatrol 全球榜",
-  version: "1.0.0",
+  version: "1.1.0",
   requiredVersion: "0.0.1",
   description: "全球主要国家和地区的 Netflix、Disney+、Apple TV、Prime、HBO 等平台最新日榜",
   author: "MakkaPakka",
@@ -84,17 +84,15 @@ WidgetMetadata = {
             { title: "Amazon Channels", value: "amazon_channels" }
           ]
         },
-        { name: "count", title: "数量", type: "count", value: "20" }
+        { name: "count", title: "数量", type: "count", value: "20" },
+        { name: "language", title: "语言", type: "language", value: "zh-CN" }
       ]
     }
   ]
 };
 
 const DEFAULT_BASE = "https://raw.githubusercontent.com/MakkaPakka518/List/main/data/flixpatrol";
-const SOURCE_ORIGIN = "https://flixpatrol.com";
 const HEADERS = { "User-Agent": "Mozilla/5.0 (ForwardWidget FlixPatrol)", Accept: "application/json" };
-const TMDB_CACHE = {};
-const DETAIL_CACHE = {};
 
 function getBody(response) {
   let body = response && response.data !== undefined ? response.data : response;
@@ -119,54 +117,11 @@ function clampCount(value) {
   return Number.isFinite(count) ? Math.min(40, Math.max(1, Math.floor(count))) : 20;
 }
 
-function normalizeTitle(value) {
-  return String(value || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
-}
-
-function itemYear(item) {
-  const match = String(item && item.sourcePath || "").match(/-(19\d{2}|20\d{2})\/$/);
-  return match ? match[1] : "";
-}
-
-function sourceUrl(item) {
-  const path = String(item && item.sourcePath || "");
-  return /^\/title\/[a-z0-9][a-z0-9-%]*\/$/.test(path) ? SOURCE_ORIGIN + path : "";
-}
-
 function mediaTypeFor(item, category) {
   if (item && (item.mediaType === "movie" || item.mediaType === "tv")) return item.mediaType;
   if (category === "movies" || category === "kids_movies") return "movie";
   if (category === "tv" || category === "kids_tv") return "tv";
   return "";
-}
-
-function candidateTitle(candidate) {
-  return candidate.title || candidate.name || candidate.original_title || candidate.original_name || "";
-}
-
-async function findTmdb(item, category) {
-  const expectedType = mediaTypeFor(item, category);
-  const key = `${expectedType || "multi"}:${normalizeTitle(item.title)}:${itemYear(item)}`;
-  if (Object.prototype.hasOwnProperty.call(TMDB_CACHE, key)) return TMDB_CACHE[key];
-  const endpoint = expectedType ? `search/${expectedType}` : "search/multi";
-  const response = await Widget.tmdb.get(endpoint, { params: { query: item.title, language: "en-US", include_adult: false } });
-  const target = normalizeTitle(item.title);
-  const year = itemYear(item);
-  let match = null;
-  for (const candidate of response && response.results || []) {
-    const mediaType = expectedType || candidate.media_type;
-    if (!candidate.id || !["movie", "tv"].includes(mediaType) || normalizeTitle(candidateTitle(candidate)) !== target) continue;
-    const releaseDate = candidate.release_date || candidate.first_air_date || "";
-    if (year && !releaseDate.startsWith(year)) continue;
-    match = { ...candidate, media_type: mediaType };
-    break;
-  }
-  TMDB_CACHE[key] = match;
-  return match;
-}
-
-function chartTitle(category) {
-  return ({ movies: "电影", tv: "剧集", overall: "综合", kids_movies: "儿童电影", kids_tv: "儿童剧集", amazon_channels: "Amazon Channels" })[category] || category;
 }
 
 function chartItems(platform, category) {
@@ -177,43 +132,12 @@ function chartItems(platform, category) {
   return (charts[category] || []).map((item) => ({ item, category }));
 }
 
-async function toVideo(entry, platformName, countryName, chartDate) {
+function toIdentity(entry) {
   const item = entry.item;
-  if (Number(item.tmdbId) > 0 && (item.mediaType === "movie" || item.mediaType === "tv")) {
-    return {
-      id: Number(item.tmdbId),
-      type: "tmdb",
-      mediaType: item.mediaType,
-      title: item.tmdbTitle || item.title,
-      posterPath: item.posterPath || undefined,
-      backdropPath: item.backdropPath || undefined,
-      releaseDate: item.releaseDate || undefined,
-      rating: item.rating,
-      description: item.description || ""
-    };
-  }
-  const tmdb = await findTmdb(item, entry.category);
-  if (tmdb) {
-    return {
-      id: Number(tmdb.id),
-      type: "tmdb",
-      mediaType: tmdb.media_type,
-      title: tmdb.title || tmdb.name || item.title,
-      posterPath: tmdb.poster_path || undefined,
-      backdropPath: tmdb.backdrop_path || undefined,
-      releaseDate: tmdb.release_date || tmdb.first_air_date || undefined,
-      rating: tmdb.vote_average,
-      description: tmdb.overview || ""
-    };
-  }
-
-  const link = sourceUrl(item);
-  if (!link) return null;
-  const fallback = { id: link, type: "url", title: item.title, description: "", link };
   const mediaType = mediaTypeFor(item, entry.category);
-  if (mediaType) fallback.mediaType = mediaType;
-  DETAIL_CACHE[link] = fallback;
-  return fallback;
+  const tmdbId = Number(item && item.tmdbId);
+  if (!tmdbId || !["movie", "tv"].includes(mediaType)) return null;
+  return { id: `${mediaType}.${tmdbId}`, type: "tmdb" };
 }
 
 loadFlixPatrol = async function loadFlixPatrol(params = {}) {
@@ -230,28 +154,23 @@ loadFlixPatrol = async function loadFlixPatrol(params = {}) {
     if (params.platform === "all") {
       for (const slug of Object.keys(body.platforms)) {
         const platform = body.platforms[slug];
-        entries.push(...chartItems(platform, category).map((entry) => ({ ...entry, platformName: platform.name || slug })));
+        entries.push(...chartItems(platform, category));
       }
     } else {
       const platform = body.platforms[platformSlug];
       if (!platform) return [];
-      entries = chartItems(platform, category).map((entry) => ({ ...entry, platformName: platform.name || platformSlug }));
+      entries = chartItems(platform, category);
     }
 
-    entries = entries.slice(0, clampCount(params.count));
-    const countryName = body.country && body.country.name || country;
-    const videos = await Promise.all(entries.map((entry) => toVideo(entry, entry.platformName, countryName, body.chartDate || "")));
-    return videos.filter(Boolean);
+    const identities = entries.map(toIdentity).filter(Boolean);
+    const seen = new Set();
+    return identities.filter(item => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    }).slice(0, clampCount(params.count));
   } catch (error) {
     console.error("[loadFlixPatrol] 失败:", error.message || error);
     throw error;
   }
-};
-
-loadDetail = async function loadDetail(link) {
-  const value = String(link || "").trim();
-  if (!/^https:\/\/flixpatrol\.com\/title\/[a-z0-9][a-z0-9-%]*\/$/.test(value)) return null;
-  if (DETAIL_CACHE[value]) return DETAIL_CACHE[value];
-  const slug = value.match(/\/title\/([^/]+)\//)[1].replace(/-19\d{2}$|-20\d{2}$/, "");
-  return { id: value, type: "url", title: slug.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" "), description: "", link: value };
 };

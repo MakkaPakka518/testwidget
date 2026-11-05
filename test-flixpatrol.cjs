@@ -15,7 +15,7 @@ const DATA = {
           { rank: 1, title: "Test Movie", sourcePath: "/title/test-movie-2026/", movement: "+1", days: "2 d", mediaType: "movie", tmdbId: 101, tmdbTitle: "测试电影", posterPath: "/movie.jpg", backdropPath: "/back.jpg", releaseDate: "2026-01-02", rating: 8.1, description: "TMDB 原生简介" },
           { rank: 2, title: "Unknown Film", sourcePath: "/title/unknown-film/", movement: "–", days: "1 d", mediaType: "movie" }
         ],
-        tv: [{ rank: 1, title: "Test Show", sourcePath: "/title/test-show/", movement: "", days: "3 d", mediaType: "tv" }]
+        tv: [{ rank: 1, title: "Test Show", sourcePath: "/title/test-show/", movement: "", days: "3 d", mediaType: "tv", tmdbId: 202 }]
       }
     },
     disney: {
@@ -32,53 +32,31 @@ global.Widget = {
       return { data: DATA };
     }
   },
-  tmdb: {
-    get: async (path, options) => {
-      calls.push({ kind: "tmdb", path, options });
-      if (options.params.query === "Test Movie") return { results: [{ id: 101, title: "Test Movie", release_date: "2026-01-02", poster_path: "/movie.jpg", backdrop_path: "/back.jpg", vote_average: 8.1, popularity: 10 }] };
-      if (options.params.query === "Test Show") return { results: [{ id: 202, name: "Test Show", first_air_date: "2025-02-03", poster_path: "/show.jpg", media_type: "tv", popularity: 5 }] };
-      return { results: [{ id: 999, title: "Wrong Title", popularity: 999 }] };
-    }
-  }
+  tmdb: { get: async () => { throw new Error("ID-only module must not request TMDB"); } }
 };
 global.WidgetMetadata = {};
 eval(fs.readFileSync(target, "utf8"));
 
 (async () => {
   assert.equal(WidgetMetadata.id, "makka.flixpatrol.top10");
+  assert.equal(WidgetMetadata.version, "1.1.0");
   assert.equal(WidgetMetadata.modules[0].functionName, "loadFlixPatrol");
+  assert.ok(WidgetMetadata.modules[0].params.some(param => param.type === "language"));
 
   const movies = await loadFlixPatrol({ country: "united-states", platform: "netflix", category: "movies", count: "10" });
   assert.equal(calls[0].url, "https://raw.githubusercontent.com/MakkaPakka518/List/main/data/flixpatrol/united-states.json");
-  assert.equal(movies.length, 2);
-  assert.deepEqual(movies[0], {
-    id: 101,
-    type: "tmdb",
-    mediaType: "movie",
-    title: "测试电影",
-    posterPath: "/movie.jpg",
-    backdropPath: "/back.jpg",
-    releaseDate: "2026-01-02",
-    rating: 8.1,
-    description: "TMDB 原生简介"
-  });
-  assert.equal(movies[0].poster_path, undefined);
-  assert.equal(movies[1].type, "url");
-  assert.equal(movies[1].link, "https://flixpatrol.com/title/unknown-film/");
+  assert.deepEqual(movies, [{ id: "movie.101", type: "tmdb" }]);
+  assert.equal(calls.filter(call => call.kind === "tmdb").length, 0);
 
   const mixed = await loadFlixPatrol({ country: "united-states", platform: "netflix", category: "all", count: "20" });
-  assert.equal(mixed.length, 3);
-  assert.equal(mixed[2].mediaType, "tv");
+  assert.deepEqual(mixed, [{ id: "movie.101", type: "tmdb" }, { id: "tv.202", type: "tmdb" }]);
 
   const allPlatforms = await loadFlixPatrol({ country: "united-states", platform: "all", category: "movies", count: "10" });
-  assert.equal(allPlatforms.length, 3);
-  assert.equal(allPlatforms[2].description, "");
+  assert.deepEqual(allPlatforms, [{ id: "movie.101", type: "tmdb" }]);
 
   const beforeInvalid = calls.length;
   assert.deepEqual(await loadFlixPatrol({ country: "../../secret", platform: "netflix" }), []);
   assert.equal(calls.length, beforeInvalid, "非法国家不得发请求");
-  assert.equal(await loadDetail("https://evil.test/title/test/"), null);
-  assert.equal((await loadDetail("https://flixpatrol.com/title/unknown-film/")).title, "Unknown Film");
 
   console.log("FlixPatrol widget tests passed", { target, calls: calls.length });
 })().catch((error) => {

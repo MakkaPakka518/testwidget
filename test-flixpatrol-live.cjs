@@ -11,7 +11,7 @@ global.Widget = {
       return { data: await response.json() };
     }
   },
-  tmdb: { get: async () => ({ results: [] }) }
+  tmdb: { get: async () => { throw new Error("ID-only module must not request TMDB"); } }
 };
 global.WidgetMetadata = {};
 eval(fs.readFileSync("./widgets/flixpatrol.js", "utf8"));
@@ -19,9 +19,8 @@ eval(fs.readFileSync("./widgets/flixpatrol.js", "utf8"));
 (async () => {
   const items = await loadFlixPatrol({ country: "united-states", platform: "netflix", category: "movies", count: "10" });
   assert.equal(items.length, 10);
-  assert.ok(items.every((item) => item.type === "tmdb" && Number.isFinite(item.id)));
-  assert.ok(items.every((item) => item.posterPath));
-  assert.ok(items.every((item) => !/#\d+ ·/.test(item.description || "")));
+  assert.ok(items.every((item) => item.type === "tmdb" && /^(movie|tv)\.\d+$/.test(item.id)));
+  assert.ok(items.every((item) => Object.keys(item).sort().join(",") === "id,type"));
   assert.equal(calls[0].url, "https://raw.githubusercontent.com/MakkaPakka518/List/main/data/flixpatrol/united-states.json");
   console.log("FlixPatrol live data test passed", { items: items.length });
 })().catch((error) => {
