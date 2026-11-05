@@ -1,15 +1,15 @@
 /**
  * 玛卡巴卡云端剧场 Forward Widget
- * 聚合骨朵、豆瓣、精选剧场、热门番剧、芒果TV 与 FlixPatrol 全球流媒体榜
+ * 聚合骨朵、豆瓣、精选剧场、热门番剧、芒果TV、FlixPatrol 与动画疯榜单
  */
 
 WidgetMetadata = {
   id: "makkapakka_hub_list_2.0",
   title: "平台剧场",
-  description: "骨朵、平台剧场、热门榜单与全球流媒体 TOP 10",
+  description: "骨朵、平台剧场、流媒体 TOP 10 与动画疯人气榜",
   author: "𝙈𝙖𝙠𝙠𝙖𝙋𝙖𝙠𝙠𝙖",
   site: "https://t.me/MakkaPakkaOvO",
-  version: "1.2.0",
+  version: "1.3.0",
   requiredVersion: "0.0.1",
 
   modules: [
@@ -290,6 +290,18 @@ WidgetMetadata = {
         { name: "page", title: "頁碼", type: "page", startPage: 1 },
         { name: "language", title: "語言", type: "language", value: "zh-CN" }
       ]
+    },
+    {
+      title: "動畫瘋人氣榜",
+      description: "GitHub 定時抓取的月人氣與年份榜",
+      functionName: "loadAniGamer",
+      type: "video",
+      cacheDuration: 3600,
+      params: [
+        { name: "sort", title: "排序", type: "enumeration", value: "monthly", enumOptions: [{ title: "月人氣排行", value: "monthly" }, { title: "年份排序", value: "yearly" }] },
+        { name: "page", title: "頁碼", type: "page", startPage: 1 },
+        { name: "language", title: "語言", type: "language", value: "zh-CN" }
+      ]
     }
   ]
 };
@@ -448,6 +460,25 @@ async function loadGuduo(params = {}) {
   if (data === Utils.emptyTips) return data;
   const list = data?.categories?.[params.category || "剧集"] || [];
   return Utils.toVideoItems(Utils.paginate(list, params.page));
+}
+
+/**
+ * 模块 7：加载动画疯人气榜
+ */
+async function loadAniGamer(params = {}) {
+  try {
+    const data = await Utils.fetch("anigamer-hot.json");
+    if (data === Utils.emptyTips || !data?.lists) throw new Error("动画疯榜单 JSON 格式不正确");
+    const sort = params.sort === "yearly" ? "yearly" : "monthly";
+    const page = String(Math.min(5, Math.max(1, Number(params.page) || 1)));
+    return Utils.toVideoItems(data.lists[sort]?.[page] || []);
+  } catch (error) {
+    let reason = error.message || String(error);
+    const status = await Utils.fetch("anigamer-status.json");
+    if (status !== Utils.emptyTips && status?.ok === false && status.reason) reason = status.reason;
+    console.error("[loadAniGamer] 失败:", reason);
+    throw new Error(`动画疯榜单更新失败：${reason}`);
+  }
 }
 
 /**
