@@ -55,7 +55,7 @@ var WidgetMetadata = {
     title: "𝙈𝙖𝙠𝙠𝙖𝙋𝙖𝙠𝙠𝙖·终极聚合",
     description: "动漫、影剧、综艺、流行风向与平台分流一网打尽",
     author: "𝙈𝙖𝙠𝙠𝙖𝙋𝙖𝙠𝙠𝙖",
-    version: "1.3.2",
+    version: "1.4.0",
     requiredVersion: "0.0.1",
     site: "https://t.me/MakkaPakkaOvO",
 
@@ -66,6 +66,12 @@ var WidgetMetadata = {
             type: "input",
             description: "选填，不填则使用内置。Trakt 榜单专用。",
             value: ""
+        },
+        {
+            name: "language",
+            title: "语言",
+            type: "language",
+            value: "zh-CN"
         }
     ],
 
@@ -1282,3 +1288,29 @@ const DynamicDataProcessor = (() => {
     }
     return { processBangumiPage, processDailyCalendar };
 })();
+
+// Rex 根据 TMDB 身份和客户端语言/海报偏好完成首次元数据渲染。
+function toRexTmdbIdentities(items) {
+    return (Array.isArray(items) ? items : []).map(item => {
+        if (!item) return null;
+        if (item.type === "text") return item;
+        const mediaType = item.mediaType;
+        const tmdbId = Number(item.tmdbId || item.id);
+        if (!tmdbId || !["movie", "tv"].includes(mediaType)) return null;
+        return { id: `${mediaType}.${tmdbId}`, type: "tmdb" };
+    }).filter(Boolean);
+}
+
+function identityRoute(handler) {
+    return async function(params = {}) {
+        return toRexTmdbIdentities(await handler(params));
+    };
+}
+
+routeAnimeOmni = identityRoute(routeAnimeOmni);
+loadGenreRank = identityRoute(loadGenreRank);
+routeMovieOmni = identityRoute(routeMovieOmni);
+loadVarietyShows = identityRoute(loadVarietyShows);
+routeTrendsHub = identityRoute(routeTrendsHub);
+loadPlatformMatrix = identityRoute(loadPlatformMatrix);
+loadOfficialTop10 = identityRoute(loadOfficialTop10);

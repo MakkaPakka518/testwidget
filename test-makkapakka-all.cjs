@@ -58,10 +58,11 @@ function official(item, label) {
 }
 
 (async () => {
+  assert.equal(WidgetMetadata.version, "1.4.0");
+  assert.ok(WidgetMetadata.globalParams.some(param => param.type === "language"));
   official(buildItem({ id: 1, tmdbId: 1, type: "movie", title: "测试", date: "2026", subTitle: "⭐ 10", desc: OVERVIEW }), "buildItem");
   official(movie_buildItem(movie), "movie_buildItem");
   official((await fetchGenreRankData("movie", "all", "all", "popularity", 1))[0], "fetchGenreRankData");
-  official((await loadVarietyShows({ sort_by: "all", list_type: "hot", page: 1 }))[0], "loadVarietyShows");
   official(await searchRtTmdb({ title: "Official Movie", mediaType: "movie", tomatoScore: "99", popcornScore: "98" }, 1), "searchRtTmdb");
   official(buildImdbItem(movie, "movie"), "buildImdbItem");
   official((await handleTraktList("trending", "movies", "client", 1))[0], "handleTraktList");
@@ -71,6 +72,14 @@ function official(item, label) {
   official((await fetchTmdbFallback_Top10("netflix", "united-states", "movie"))[0], "fetchTmdbFallback_Top10");
   official((await sanitizeAndEnsureTmdb([{ name_cn: "Official Show", title: "Official Show", releaseDate: "2026" }]))[0], "sanitizeAndEnsureTmdb");
   official((await fetchRecentHot({ page: 1 }))[0], "fetchRecentHot");
+
+  assert.deepEqual(await routeAnimeOmni({ anime_source: "tmdb" }), [{ id: "tv.202", type: "tmdb" }]);
+  assert.deepEqual(await loadGenreRank({ sort_by: "movie", genre: "all", region: "all", order_rule: "popularity" }), [{ id: "movie.101", type: "tmdb" }]);
+  assert.deepEqual(await routeMovieOmni({ movie_source: "general" }), [{ id: "movie.101", type: "tmdb" }]);
+  assert.deepEqual(await loadVarietyShows({ sort_by: "all", list_type: "hot" }), [{ id: "tv.202", type: "tmdb" }]);
+  assert.deepEqual(await routeTrendsHub({ hub_source: "imdb", imdb_sort: "popular", mediaType: "movie" }), [{ id: "movie.101", type: "tmdb" }]);
+  assert.deepEqual(await loadPlatformMatrix({ sort_by: "movie", platform: "213" }), [{ id: "movie.101", type: "tmdb" }]);
+  assert.deepEqual(await loadOfficialTop10({ sort_by: "united-states", platform: "netflix", mediaType: "movie" }), [{ id: "movie.101", type: "tmdb" }]);
 
   for (const pattern of [/description:\s*`TOP /, /description:\s*`豆瓣 /, /description:\s*`电影\\n/, /description:\s*`\$\{date\}\\n/]) {
     assert.equal(pattern.test(source), false, `custom description remains: ${pattern}`);

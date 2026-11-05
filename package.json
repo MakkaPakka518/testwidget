@@ -12,6 +12,7 @@
     "test:flixpatrol:live": "node test-flixpatrol-live.cjs",
     "test:makkapakka": "node test-makkapakka-all.cjs",
     "test:platform-theater": "node test-platform-theater.cjs",
+    "test:guduo": "node test-guduo-id-only.cjs",
     "test:dist": "node test-tiktok.cjs ./dist/tiktok.js && node test-twitter.cjs ./dist/twitter.js && node test-twitch.cjs ./dist/twitch.js && node test-flixpatrol.cjs ./dist/flixpatrol.js && node test-bilibili.cjs ./dist/bilibili.js && node test-douyin.cjs ./dist/douyin.js",
     "test:worker": "node test-bili-worker.mjs"
   },

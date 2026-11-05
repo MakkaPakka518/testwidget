@@ -26,6 +26,7 @@ const responses = {
   "theater-data.json": { "迷雾剧场": { aired: [item], upcoming: [] } },
   "bangumi-hot.json": { hot_anime: [item] },
   "mgtv-hot.json": { tv: [item], show: [] },
+  "guduo-hot.json": { categories: { "剧集": [item] } },
   "flixpatrol/world.json": { platforms: { netflix: { charts: { movies: [item], tv: [item] } } } }
 };
 
@@ -41,31 +42,26 @@ global.Widget = {
 
 eval(fs.readFileSync("./平台剧场.js", "utf8"));
 
-function official(result, label) {
+function identity(result, label) {
   assert.equal(result.length, 1, `${label} count`);
-  const value = result[0];
-  assert.equal(value.id, 101);
-  assert.equal(value.type, "tmdb");
-  assert.equal(value.title, "TMDB 中文标题");
-  assert.equal(value.description, OVERVIEW);
-  assert.equal(value.rank, undefined);
-  assert.equal(value.heat, undefined);
-  assert.equal(value.popularity, undefined);
-  assert.equal(value.voteCount, undefined);
+  assert.deepEqual(result[0], { id: "tv.101", type: "tmdb" });
 }
 
 (async () => {
-  assert.equal(WidgetMetadata.version, "1.1.0");
-  assert.equal(WidgetMetadata.modules.length, 5);
+  assert.equal(WidgetMetadata.version, "1.2.0");
+  assert.equal(WidgetMetadata.modules.length, 6);
   assert.equal(WidgetMetadata.modules[4].functionName, "loadFlixPatrol");
+  assert.equal(WidgetMetadata.modules[5].functionName, "loadGuduo");
+  assert.ok(WidgetMetadata.modules.every(module => module.params.some(param => param.type === "language")));
 
-  official(await loadDouban({ channel: "tv" }), "Douban");
-  official(await loadTheater({ brand: "迷雾剧场", status: "aired" }), "Theater");
-  official(await loadBangumi({ genre: "16" }), "Bangumi");
-  official(await loadMangoTV({ sort_by: "tv" }), "MangoTV");
-  official(await loadFlixPatrol({ country: "world", platform: "netflix", chart: "movies" }), "FlixPatrol");
+  identity(await loadDouban({ channel: "tv" }), "Douban");
+  identity(await loadTheater({ brand: "迷雾剧场", status: "aired" }), "Theater");
+  identity(await loadBangumi({ genre: "16" }), "Bangumi");
+  identity(await loadMangoTV({ sort_by: "tv" }), "MangoTV");
+  identity(await loadFlixPatrol({ country: "world", platform: "netflix", chart: "movies" }), "FlixPatrol");
+  identity(await loadGuduo({ category: "剧集" }), "Guduo");
 
-  console.log("Platform theater official overview tests passed");
+  console.log("Platform theater ID-only tests passed");
 })().catch(error => {
   console.error(error);
   process.exit(1);

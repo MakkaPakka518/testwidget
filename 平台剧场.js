@@ -1,15 +1,15 @@
 /**
  * 玛卡巴卡云端剧场 Forward Widget
- * 聚合豆瓣榜单、精选剧场、热门番剧、芒果TV 与 FlixPatrol 全球流媒体榜
+ * 聚合骨朵、豆瓣、精选剧场、热门番剧、芒果TV 与 FlixPatrol 全球流媒体榜
  */
 
 WidgetMetadata = {
   id: "makkapakka_hub_list_2.0",
   title: "平台剧场",
-  description: "各平台剧场、热门榜单与全球流媒体 TOP 10",
+  description: "骨朵、平台剧场、热门榜单与全球流媒体 TOP 10",
   author: "𝙈𝙖𝙠𝙠𝙖𝙋𝙖𝙠𝙠𝙖",
   site: "https://t.me/MakkaPakkaOvO",
-  version: "1.1.0",
+  version: "1.2.0",
   requiredVersion: "0.0.1",
 
   modules: [
@@ -56,7 +56,8 @@ WidgetMetadata = {
           title: "頁碼",
           type: "page",
           startPage: 1
-        }
+        },
+        { name: "language", title: "語言", type: "language", value: "zh-CN" }
       ]
     },
     {
@@ -119,7 +120,8 @@ WidgetMetadata = {
           title: "頁碼",
           type: "page",
           startPage: 1
-        }
+        },
+        { name: "language", title: "語言", type: "language", value: "zh-CN" }
       ]
     },
     {
@@ -165,7 +167,8 @@ WidgetMetadata = {
           title: "頁碼",
           type: "page",
           startPage: 1
-        }
+        },
+        { name: "language", title: "語言", type: "language", value: "zh-CN" }
       ]
     },
     {
@@ -204,7 +207,8 @@ WidgetMetadata = {
           title: "頁碼",
           type: "page",
           startPage: 1
-        }
+        },
+        { name: "language", title: "語言", type: "language", value: "zh-CN" }
       ]
     },
     {
@@ -260,7 +264,31 @@ WidgetMetadata = {
             { title: "兒童劇集", value: "kids_tv" }
           ]
         },
-        { name: "page", title: "頁碼", type: "page", startPage: 1 }
+        { name: "page", title: "頁碼", type: "page", startPage: 1 },
+        { name: "language", title: "語言", type: "language", value: "zh-CN" }
+      ]
+    },
+    {
+      title: "骨朵熱榜",
+      description: "每日全網劇集、動漫、綜藝與電影榜單",
+      functionName: "loadGuduo",
+      type: "video",
+      cacheDuration: 21600,
+      params: [
+        {
+          name: "category",
+          title: "榜單分類",
+          type: "enumeration",
+          value: "剧集",
+          enumOptions: [
+            { title: "陸劇", value: "剧集" },
+            { title: "國漫", value: "动漫" },
+            { title: "綜藝", value: "综艺" },
+            { title: "電影", value: "电影" }
+          ]
+        },
+        { name: "page", title: "頁碼", type: "page", startPage: 1 },
+        { name: "language", title: "語言", type: "language", value: "zh-CN" }
       ]
     }
   ]
@@ -331,18 +359,9 @@ const Utils = {
     if (!item || item.type === "text") return item;
     const id = Number(item.tmdbId || item.id);
     if (!Number.isFinite(id) || id <= 0) return null;
-    return {
-      id,
-      type: "tmdb",
-      mediaType: item.mediaType || "tv",
-      title: item.tmdbTitle || item.title || "",
-      description: item.description || item.overview || "",
-      posterPath: item.posterPath,
-      backdropPath: item.backdropPath,
-      releaseDate: item.releaseDate,
-      rating: item.rating,
-      genreTitle: item.genreTitle
-    };
+    const mediaType = item.mediaType || "tv";
+    if (!["movie", "tv"].includes(mediaType)) return null;
+    return { id: `${mediaType}.${id}`, type: "tmdb" };
   },
 
   toVideoItems(list) {
@@ -422,7 +441,17 @@ async function loadMangoTV(params = {}) {
 }
 
 /**
- * 模块 5：加载 FlixPatrol 全球流媒体榜
+ * 模块 5：加载骨朵热榜
+ */
+async function loadGuduo(params = {}) {
+  const data = await Utils.fetch("guduo-hot.json");
+  if (data === Utils.emptyTips) return data;
+  const list = data?.categories?.[params.category || "剧集"] || [];
+  return Utils.toVideoItems(Utils.paginate(list, params.page));
+}
+
+/**
+ * 模块 6：加载 FlixPatrol 全球流媒体榜
  */
 async function loadFlixPatrol(params = {}) {
   const allowedCountries = ["world", "united-states", "taiwan", "hong-kong", "singapore", "south-korea", "japan"];
