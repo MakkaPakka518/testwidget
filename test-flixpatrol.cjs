@@ -12,7 +12,7 @@ const DATA = {
       name: "Netflix",
       charts: {
         movies: [
-          { rank: 1, title: "Test Movie", sourcePath: "/title/test-movie-2026/", movement: "+1", days: "2 d", mediaType: "movie" },
+          { rank: 1, title: "Test Movie", sourcePath: "/title/test-movie-2026/", movement: "+1", days: "2 d", mediaType: "movie", tmdbId: 101 },
           { rank: 2, title: "Unknown Film", sourcePath: "/title/unknown-film/", movement: "–", days: "1 d", mediaType: "movie" }
         ],
         tv: [{ rank: 1, title: "Test Show", sourcePath: "/title/test-show/", movement: "", days: "3 d", mediaType: "tv" }]
@@ -56,12 +56,9 @@ eval(fs.readFileSync(target, "utf8"));
     type: "tmdb",
     mediaType: "movie",
     title: "Test Movie",
-    posterPath: "/movie.jpg",
-    backdropPath: "/back.jpg",
-    releaseDate: "2026-01-02",
-    rating: 8.1,
     description: "#1 · Netflix · 电影 · United States · 2026-11-05 · 变化 +1 · 在榜 2 d"
   });
+  assert.equal(movies[0].posterPath, undefined);
   assert.equal(movies[0].poster_path, undefined);
   assert.equal(movies[1].type, "url");
   assert.equal(movies[1].link, "https://flixpatrol.com/title/unknown-film/");

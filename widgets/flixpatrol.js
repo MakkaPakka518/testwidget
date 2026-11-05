@@ -164,23 +164,21 @@ async function findTmdb(item, category) {
   const key = `${expectedType || "multi"}:${normalizeTitle(item.title)}:${itemYear(item)}`;
   if (Object.prototype.hasOwnProperty.call(TMDB_CACHE, key)) return TMDB_CACHE[key];
   const endpoint = expectedType ? `search/${expectedType}` : "search/multi";
-  const response = await Widget.tmdb.get(endpoint, { params: { query: item.title, language: "zh-CN", include_adult: false } });
+  const response = await Widget.tmdb.get(endpoint, { params: { query: item.title, language: "en-US", include_adult: false } });
   const target = normalizeTitle(item.title);
   const year = itemYear(item);
-  let best = null;
-  let bestScore = -1;
+  const matches = {};
   for (const candidate of response && response.results || []) {
     const mediaType = expectedType || candidate.media_type;
     if (!candidate.id || !["movie", "tv"].includes(mediaType) || normalizeTitle(candidateTitle(candidate)) !== target) continue;
     const releaseDate = candidate.release_date || candidate.first_air_date || "";
-    const score = (year && releaseDate.startsWith(year) ? 1000 : 0) + Number(candidate.popularity || 0);
-    if (score > bestScore) {
-      best = { ...candidate, media_type: mediaType };
-      bestScore = score;
-    }
+    if (year && !releaseDate.startsWith(year)) continue;
+    matches[candidate.id] = { ...candidate, media_type: mediaType };
   }
-  TMDB_CACHE[key] = best;
-  return best;
+  const candidates = Object.values(matches);
+  const match = candidates.length === 1 ? candidates[0] : null;
+  TMDB_CACHE[key] = match;
+  return match;
 }
 
 function chartTitle(category) {
@@ -206,6 +204,15 @@ async function toVideo(entry, platformName, countryName, chartDate) {
     item.movement ? `变化 ${item.movement}` : "",
     item.days ? `在榜 ${item.days}` : ""
   ].filter(Boolean).join(" · ");
+  if (Number(item.tmdbId) > 0 && (item.mediaType === "movie" || item.mediaType === "tv")) {
+    return {
+      id: Number(item.tmdbId),
+      type: "tmdb",
+      mediaType: item.mediaType,
+      title: item.title,
+      description: detail
+    };
+  }
   const tmdb = await findTmdb(item, entry.category);
   if (tmdb) {
     return {
@@ -213,10 +220,6 @@ async function toVideo(entry, platformName, countryName, chartDate) {
       type: "tmdb",
       mediaType: tmdb.media_type,
       title: item.title,
-      posterPath: tmdb.poster_path || undefined,
-      backdropPath: tmdb.backdrop_path || undefined,
-      releaseDate: tmdb.release_date || tmdb.first_air_date || undefined,
-      rating: tmdb.vote_average,
       description: detail
     };
   }
