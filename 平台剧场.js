@@ -299,6 +299,10 @@ WidgetMetadata = {
       cacheDuration: 3600,
       params: [
         { name: "sort", title: "排序", type: "enumeration", value: "monthly", enumOptions: [{ title: "月人氣排行", value: "monthly" }, { title: "年份排序", value: "yearly" }] },
+        { name: "filter", title: "篩選方式", type: "enumeration", value: "all", belongTo: { paramName: "sort", value: ["monthly"] }, enumOptions: [{ title: "全部", value: "all" }, { title: "屬性", value: "tags" }, { title: "類型", value: "categories" }, { title: "對象", value: "targets" }] },
+        { name: "tag", title: "屬性", type: "enumeration", value: "動作", belongTo: { paramName: "filter", value: ["tags"] }, enumOptions: ["動作", "冒險", "奇幻", "異世界", "科幻", "校園", "喜劇", "戀愛", "懸疑", "運動", "特攝", "BL", "GL"].map(value => ({ title: value, value })) },
+        { name: "category", title: "類型", type: "enumeration", value: "電影", belongTo: { paramName: "filter", value: ["categories"] }, enumOptions: ["電影", "OVA", "雙語", "泡麵番", "真人演出"].map(value => ({ title: value, value })) },
+        { name: "target", title: "對象", type: "enumeration", value: "闔家觀賞", belongTo: { paramName: "filter", value: ["targets"] }, enumOptions: ["闔家觀賞", "付費會員", "年齡限制"].map(value => ({ title: value, value })) },
         { name: "page", title: "頁碼", type: "page", startPage: 1 },
         { name: "language", title: "語言", type: "language", value: "zh-CN" }
       ]
@@ -470,8 +474,15 @@ async function loadAniGamer(params = {}) {
     const data = await Utils.fetch("anigamer-hot.json");
     if (data === Utils.emptyTips || !data?.lists) throw new Error("动画疯榜单 JSON 格式不正确");
     const sort = params.sort === "yearly" ? "yearly" : "monthly";
-    const page = String(Math.min(5, Math.max(1, Number(params.page) || 1)));
-    return Utils.toVideoItems(data.lists[sort]?.[page] || []);
+    const filter = ["tags", "categories", "targets"].includes(params.filter) ? params.filter : "all";
+    const values = { tags: ["動作", "冒險", "奇幻", "異世界", "科幻", "校園", "喜劇", "戀愛", "懸疑", "運動", "特攝", "BL", "GL"], categories: ["電影", "OVA", "雙語", "泡麵番", "真人演出"], targets: ["闔家觀賞", "付費會員", "年齡限制"] };
+    const selectedValue = filter === "tags" ? params.tag : filter === "categories" ? params.category : params.target;
+    const pageLimit = sort === "monthly" && filter !== "all" ? 3 : 5;
+    const page = String(Math.min(pageLimit, Math.max(1, Number(params.page) || 1)));
+    const list = sort === "monthly" && filter !== "all" && values[filter].includes(selectedValue)
+      ? data.filters?.monthly?.[filter]?.[selectedValue]?.[page] || []
+      : data.lists[sort]?.[page] || [];
+    return Utils.toVideoItems(list);
   } catch (error) {
     let reason = error.message || String(error);
     const status = await Utils.fetch("anigamer-status.json");

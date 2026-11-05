@@ -11,7 +11,8 @@ const data = {
       ]
     },
     yearly: { "1": [{ tmdbId: 101, mediaType: "movie" }] }
-  }
+  },
+  filters: { monthly: { tags: {}, categories: { "電影": { "1": [{ tmdbId: 303, mediaType: "movie" }] } }, targets: {} } }
 };
 const calls = [];
 let failureMode = false;
@@ -35,6 +36,7 @@ eval(fs.readFileSync("./widgets/anigamer.js", "utf8"));
   assert.ok(WidgetMetadata.modules[0].params.some(param => param.type === "language"));
   assert.deepEqual(await loadAniGamer({ sort: "monthly", page: 1 }), [{ id: "tv.202", type: "tmdb" }]);
   assert.deepEqual(await loadAniGamer({ sort: "yearly", page: 1 }), [{ id: "movie.101", type: "tmdb" }]);
+  assert.deepEqual(await loadAniGamer({ sort: "monthly", filter: "categories", category: "電影", page: 1 }), [{ id: "movie.303", type: "tmdb" }]);
   assert.equal(Object.keys((await loadAniGamer({ sort: "monthly", page: 1 }))[0]).sort().join(","), "id,type");
   assert.ok(calls[0].endsWith("/anigamer-hot.json"));
 

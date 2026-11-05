@@ -27,7 +27,7 @@ const responses = {
   "bangumi-hot.json": { hot_anime: [item] },
   "mgtv-hot.json": { tv: [item], show: [] },
   "guduo-hot.json": { categories: { "剧集": [item] } },
-  "anigamer-hot.json": { schemaVersion: 1, lists: { monthly: { "1": [item] }, yearly: { "1": [] } } },
+  "anigamer-hot.json": { schemaVersion: 1, lists: { monthly: { "1": [item] }, yearly: { "1": [] } }, filters: { monthly: { tags: {}, categories: { "電影": { "1": [{ ...item, tmdbId: 303, mediaType: "movie" }] } }, targets: {} } } },
   "flixpatrol/world.json": { platforms: { netflix: { charts: { movies: [item], tv: [item] } } } }
 };
 
@@ -63,6 +63,8 @@ function identity(result, label) {
   identity(await loadFlixPatrol({ country: "world", platform: "netflix", chart: "movies" }), "FlixPatrol");
   identity(await loadGuduo({ category: "剧集" }), "Guduo");
   identity(await loadAniGamer({ sort: "monthly", page: 1 }), "AniGamer");
+  const filteredAni = await loadAniGamer({ sort: "monthly", filter: "categories", category: "電影", page: 1 });
+  assert.deepEqual(filteredAni, [{ id: "movie.303", type: "tmdb" }]);
 
   console.log("Platform theater ID-only tests passed");
 })().catch(error => {
