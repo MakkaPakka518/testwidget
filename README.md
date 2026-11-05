@@ -29,7 +29,7 @@ ForwardWidget/rex 测试模块。
 ## FlixPatrol 全球榜
 
 - 模块文件：[`widgets/flixpatrol.js`](widgets/flixpatrol.js)
-- 支持 FlixPatrol 覆盖的全部国家/地区，以及 Netflix、Disney+、Apple TV、Amazon Prime、HBO Max 等平台的电影、剧集、综合与儿童 TOP 10。
+- 支持全球主要国家/地区，以及 Netflix、Disney+、Apple TV、Amazon Prime、HBO Max 等平台的电影、剧集、综合与儿童 TOP 10。
 - 榜单由 [`MakkaPakka518/List`](https://github.com/MakkaPakka518/List) 的 GitHub Actions 每日使用 Scrapling 抓取，模块只读取按国家拆分的 raw JSON，避免 rex 直接访问 FlixPatrol 时遇到 Cloudflare 403。
 - 榜单代表 FlixPatrol 已发布的最新日榜，不是未来预测；条目在模块内通过 rex 的 TMDB 接口匹配海报和内置详情页。
 

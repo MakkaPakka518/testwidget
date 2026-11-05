@@ -3,7 +3,7 @@ WidgetMetadata = {
   title: "FlixPatrol 全球榜",
   version: "1.0.0",
   requiredVersion: "0.0.1",
-  description: "各国家和地区的 Netflix、Disney+、Apple TV、Prime、HBO 等平台最新日榜",
+  description: "全球主要国家和地区的 Netflix、Disney+、Apple TV、Prime、HBO 等平台最新日榜",
   author: "MakkaPakka",
   site: "https://flixpatrol.com/top10/",
   detailCacheDuration: 3600,
@@ -29,7 +29,7 @@ WidgetMetadata = {
           title: "国家/地区",
           type: "input",
           value: "united-states",
-          description: "可输入 List 索引中的任意国家 slug",
+          description: "可输入 List 索引中的主流国家/地区 slug",
           placeholders: [
             { title: "全球", value: "world" },
             { title: "美国", value: "united-states" },
