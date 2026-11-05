@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "makka.linetv.catalog",
   title: "LINE TV",
-  version: "2.0.1",
+  version: "2.0.3",
   requiredVersion: "0.0.1",
   description: "LINE TV 公开目录、详情、分集与动态播放源；支持 HLS 及 Widevine DASH",
   author: "MakkaPakka",
@@ -398,11 +398,49 @@ function withPlaybackTime(url, timestamp) {
   return `${raw}${raw.includes("?") ? "&" : "?"}time=${timestamp}`;
 }
 
-function rewriteMediaPlaylist(text, playlistUrl, timestamp) {
-  return String(text || "").split(/\r?\n/).map(line => {
+function bytesFromResponse(data) {
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (Array.isArray(data)) return new Uint8Array(data);
+  if (typeof data === "string") return new Uint8Array(Array.from(data, char => char.charCodeAt(0) & 255));
+  return new Uint8Array(0);
+}
+
+function bytesToBase64(bytes) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let result = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const first = bytes[index];
+    const second = index + 1 < bytes.length ? bytes[index + 1] : 0;
+    const third = index + 2 < bytes.length ? bytes[index + 2] : 0;
+    const value = (first << 16) | (second << 8) | third;
+    result += alphabet[(value >> 18) & 63];
+    result += alphabet[(value >> 12) & 63];
+    result += index + 1 < bytes.length ? alphabet[(value >> 6) & 63] : "=";
+    result += index + 2 < bytes.length ? alphabet[value & 63] : "=";
+  }
+  return result;
+}
+
+async function rewriteMediaPlaylist(text, playlistUrl, timestamp, headers) {
+  const lines = String(text || "").split(/\r?\n/);
+  const keyData = {};
+  const keyUrls = lines.filter(line => line.startsWith("#EXT-X-KEY")).map(line => {
+    const match = line.match(/URI="([^"]+)"/);
+    return match ? withPlaybackTime(resolveHlsUrl(playlistUrl, match[1]), timestamp) : "";
+  }).filter((url, index, values) => url && values.indexOf(url) === index);
+  await Promise.all(keyUrls.map(async keyUrl => {
+    const response = await Widget.http.get(keyUrl, { headers, responseType: "arraybuffer" });
+    const bytes = bytesFromResponse(response && response.data);
+    if (bytes.length === 16) keyData[keyUrl] = `data:application/octet-stream;base64,${bytesToBase64(bytes)}`;
+  }));
+  return lines.map(line => {
     if (!line) return line;
     if (!line.startsWith("#")) return withPlaybackTime(resolveHlsUrl(playlistUrl, line), timestamp);
-    return line.replace(/URI="([^"]+)"/g, (_, uri) => `URI="${withPlaybackTime(resolveHlsUrl(playlistUrl, uri), timestamp)}"`);
+    return line.replace(/URI="([^"]+)"/g, (_, uri) => {
+      const resolved = withPlaybackTime(resolveHlsUrl(playlistUrl, uri), timestamp);
+      return `URI="${line.startsWith("#EXT-X-KEY") && keyData[resolved] || resolved}"`;
+    });
   }).join("\n");
 }
 
@@ -421,9 +459,24 @@ function parseMasterVariants(text, masterUrl) {
     }
     const resolution = line.match(/RESOLUTION=\d+x(\d+)/i);
     const height = resolution ? Number(resolution[1]) : 0;
-    if (uri && height >= 720) variants.push({ height, url: resolveHlsUrl(masterUrl, uri) });
+    const audio = line.match(/AUDIO="([^"]+)"/i);
+    if (uri && height >= 720) variants.push({ height, url: resolveHlsUrl(masterUrl, uri), streamInfo: line, audioGroup: audio && audio[1] || "" });
   }
   return variants.sort((left, right) => right.height - left.height);
+}
+
+function parseAudioTracks(text, masterUrl) {
+  return String(text || "").split(/\r?\n/).map(line => {
+    if (!line.startsWith("#EXT-X-MEDIA") || !/TYPE=AUDIO/i.test(line)) return null;
+    const group = line.match(/GROUP-ID="([^"]+)"/i);
+    const uri = line.match(/URI="([^"]+)"/i);
+    if (!group || !uri) return null;
+    return { group: group[1], url: resolveHlsUrl(masterUrl, uri[1]), line };
+  }).filter(Boolean);
+}
+
+function playlistDataUrl(text) {
+  return `data:application/vnd.apple.mpegurl;charset=utf-8,${encodeURIComponent(text)}`;
 }
 
 async function hlsResources(url, headers) {
@@ -434,16 +487,33 @@ async function hlsResources(url, headers) {
   if (!master.includes("#EXTM3U")) return [];
   const variants = parseMasterVariants(master, url);
   if (!variants.length) return [];
+  const audioTracks = parseAudioTracks(master, url);
   const resources = await Promise.all(variants.map(async variant => {
     const playlistUrl = withPlaybackTime(variant.url, timestamp);
     const playlistResponse = await Widget.http.get(playlistUrl, { headers });
     const playlist = String(playlistResponse && playlistResponse.data || "");
     if (!playlist.includes("#EXTM3U")) return null;
-    const rewritten = rewriteMediaPlaylist(playlist, variant.url, timestamp);
+    const videoUrl = playlistDataUrl(await rewriteMediaPlaylist(playlist, variant.url, timestamp, headers));
+    const matchingAudio = audioTracks.filter(track => track.group === variant.audioGroup);
+    const audioLines = await Promise.all(matchingAudio.map(async track => {
+      const audioResponse = await Widget.http.get(withPlaybackTime(track.url, timestamp), { headers });
+      const audioPlaylist = String(audioResponse && audioResponse.data || "");
+      if (!audioPlaylist.includes("#EXTM3U")) return "";
+      const audioUrl = playlistDataUrl(await rewriteMediaPlaylist(audioPlaylist, track.url, timestamp, headers));
+      return track.line.replace(/URI="[^"]+"/i, `URI="${audioUrl}"`);
+    }));
+    if (variant.audioGroup && !audioLines.some(Boolean)) return null;
+    const singleQualityMaster = [
+      "#EXTM3U",
+      ...master.split(/\r?\n/).filter(line => /^#EXT-X-(?:VERSION|INDEPENDENT-SEGMENTS)/.test(line)),
+      ...audioLines.filter(Boolean),
+      variant.streamInfo,
+      videoUrl
+    ].join("\n");
     return {
       name: `LINE TV ${variant.height}P`,
       description: `${variant.height}P · HLS · 动态授权`,
-      url: `data:application/vnd.apple.mpegurl;charset=utf-8,${encodeURIComponent(rewritten)}`,
+      url: playlistDataUrl(singleQualityMaster),
       playerType: "app",
       customHeaders: headers
     };

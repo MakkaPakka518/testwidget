@@ -23,8 +23,10 @@ global.Widget = {
         if (playbackMode === "drm") return { data: { sourceInfo: { decryptionType: "DRM", dash: { url: "https://cdn/video.mpd" }, license: { widevine: "https://license/widevine", licenseHeaders: [{ for: ["widevine"], key: "Authorization", value: "token" }] } } } };
         return { data: { sourceInfo: { decryptionType: "ClearKey", hls: { url: "https://cdn/jurassicPark/master.m3u8", keyId: "key", keyType: "type" } } } };
       }
-      if (url.includes("/jurassicPark/master.m3u8")) return { data: "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080\n1080/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720\n720/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=150000,RESOLUTION=426x239\n239/index.m3u8\n" };
+      if (url.includes("/jurassicPark/master.m3u8")) return { data: "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"AAC\",DEFAULT=YES,AUTOSELECT=YES,URI=\"audio/index.m3u8\"\n#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080,AUDIO=\"audio\"\n1080/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2800000,RESOLUTION=1280x720,AUDIO=\"audio\"\n720/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=150000,RESOLUTION=426x239,AUDIO=\"audio\"\n239/index.m3u8\n" };
       if (url.includes("/jurassicPark/1080/index.m3u8") || url.includes("/jurassicPark/720/index.m3u8")) return { data: "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"../keys/key.bin\"\n#EXTINF:6,\nsegment-1.ts\n" };
+      if (url.includes("/jurassicPark/audio/index.m3u8")) return { data: "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"../keys/audio-key.bin\"\n#EXTINF:6,\naudio-1.ts\n" };
+      if (url.includes("/jurassicPark/keys/")) return { data: new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) };
       if (url.includes("/api/drama?")) return { data: { summary: JSON.stringify([{ drama_id: 23570, name: "小豆與小麥", actors: [{ name: "齋藤飛鳥" }], total_eps: 12, current_eps: 5 }]) } };
       if (url.includes("release-schedule")) return { data: { datas: [catalog] } };
       if (url.includes("channels/")) return { data: [{ type: "album", datas: [catalog] }] };
@@ -45,7 +47,7 @@ global.WidgetMetadata = {};
 eval(fs.readFileSync(target, "utf8"));
 
 (async () => {
-  assert.equal(WidgetMetadata.version, "2.0.1");
+  assert.equal(WidgetMetadata.version, "2.0.3");
   assert.ok(WidgetMetadata.modules.some(module => module.id === "loadResource" && module.type === "stream"));
 
   const list = await loadLineTv({ source: "top10", page: 1 });
@@ -72,9 +74,14 @@ eval(fs.readFileSync(target, "utf8"));
   assert.ok(hls.every(resource => resource.customHeaders.authentication === "jp-token"));
   assert.ok(hls.every(resource => resource.url.startsWith("data:application/vnd.apple.mpegurl")));
   const rewritten = decodeURIComponent(hls[0].url.split(",")[1]);
-  assert.match(rewritten, /https:\/\/cdn\/jurassicPark\/1080\/segment-1\.ts\?time=\d+/);
-  assert.match(rewritten, /URI="https:\/\/cdn\/jurassicPark\/keys\/key\.bin\?time=\d+"/);
+  assert.match(rewritten, /#EXT-X-MEDIA:TYPE=AUDIO/);
+  assert.match(rewritten, /AUDIO="audio"/);
+  assert.match(rewritten, /URI="data:application\/vnd\.apple\.mpegurl/);
+  assert.match(rewritten, /data:application\/vnd\.apple\.mpegurl[^\n]+/);
   assert.ok(!hls.some(resource => resource.name.includes("239P")));
+  const keyCalls = calls.filter(call => call.url.includes("/jurassicPark/keys/"));
+  assert.ok(keyCalls.length >= 2);
+  assert.ok(keyCalls.every(call => call.options.responseType === "arraybuffer" && call.options.headers.authentication === "jp-token"));
   assert.ok(calls.some(call => call.method === "POST" && call.url.includes("/api/part/dinosaurKeeper?")));
 
   playbackMode = "drm";
