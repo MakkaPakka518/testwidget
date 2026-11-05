@@ -19,9 +19,9 @@ eval(fs.readFileSync("./widgets/flixpatrol.js", "utf8"));
 (async () => {
   const items = await loadFlixPatrol({ country: "united-states", platform: "netflix", category: "movies", count: "10" });
   assert.equal(items.length, 10);
-  assert.equal(items[0].type, "url");
-  assert.match(items[0].link, /^https:\/\/flixpatrol\.com\/title\//);
-  assert.match(items[0].description, /#1 · Netflix · 电影 · United States/);
+  assert.ok(items.every((item) => item.type === "tmdb" && Number.isFinite(item.id)));
+  assert.ok(items.every((item) => item.posterPath));
+  assert.ok(items.every((item) => !/#\d+ ·/.test(item.description || "")));
   assert.equal(calls[0].url, "https://raw.githubusercontent.com/MakkaPakka518/List/main/data/flixpatrol/united-states.json");
   console.log("FlixPatrol live data test passed", { items: items.length });
 })().catch((error) => {
