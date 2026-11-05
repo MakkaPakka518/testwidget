@@ -31,28 +31,17 @@ WidgetMetadata = {
           value: "united-states",
           description: "可输入 List 索引中的主流国家/地区 slug",
           placeholders: [
-            { title: "全球", value: "world" },
             { title: "美国", value: "united-states" },
             { title: "英国", value: "united-kingdom" },
             { title: "加拿大", value: "canada" },
-            { title: "澳大利亚", value: "australia" },
             { title: "香港", value: "hong-kong" },
             { title: "台湾", value: "taiwan" },
             { title: "日本", value: "japan" },
             { title: "韩国", value: "south-korea" },
             { title: "新加坡", value: "singapore" },
             { title: "马来西亚", value: "malaysia" },
-            { title: "泰国", value: "thailand" },
-            { title: "印度", value: "india" },
-            { title: "德国", value: "germany" },
-            { title: "法国", value: "france" },
             { title: "西班牙", value: "spain" },
-            { title: "意大利", value: "italy" },
-            { title: "巴西", value: "brazil" },
-            { title: "墨西哥", value: "mexico" },
-            { title: "阿根廷", value: "argentina" },
-            { title: "阿联酋", value: "united-arab-emirates" },
-            { title: "南非", value: "south-africa" }
+            { title: "尼日利亚", value: "nigeria" }
           ]
         },
         {
@@ -195,22 +184,17 @@ function chartItems(platform, category) {
 
 async function toVideo(entry, platformName, countryName, chartDate) {
   const item = entry.item;
-  const detail = [
-    `#${item.rank}`,
-    platformName,
-    chartTitle(entry.category),
-    countryName,
-    chartDate,
-    item.movement ? `变化 ${item.movement}` : "",
-    item.days ? `在榜 ${item.days}` : ""
-  ].filter(Boolean).join(" · ");
   if (Number(item.tmdbId) > 0 && (item.mediaType === "movie" || item.mediaType === "tv")) {
     return {
       id: Number(item.tmdbId),
       type: "tmdb",
       mediaType: item.mediaType,
-      title: item.title,
-      description: detail
+      title: item.tmdbTitle || item.title,
+      posterPath: item.posterPath || undefined,
+      backdropPath: item.backdropPath || undefined,
+      releaseDate: item.releaseDate || undefined,
+      rating: item.rating,
+      description: item.description || ""
     };
   }
   const tmdb = await findTmdb(item, entry.category);
@@ -219,14 +203,18 @@ async function toVideo(entry, platformName, countryName, chartDate) {
       id: Number(tmdb.id),
       type: "tmdb",
       mediaType: tmdb.media_type,
-      title: item.title,
-      description: detail
+      title: tmdb.title || tmdb.name || item.title,
+      posterPath: tmdb.poster_path || undefined,
+      backdropPath: tmdb.backdrop_path || undefined,
+      releaseDate: tmdb.release_date || tmdb.first_air_date || undefined,
+      rating: tmdb.vote_average,
+      description: tmdb.overview || ""
     };
   }
 
   const link = sourceUrl(item);
   if (!link) return null;
-  const fallback = { id: link, type: "url", title: item.title, description: `${detail} · 未匹配到 TMDB`, link };
+  const fallback = { id: link, type: "url", title: item.title, description: "", link };
   const mediaType = mediaTypeFor(item, entry.category);
   if (mediaType) fallback.mediaType = mediaType;
   DETAIL_CACHE[link] = fallback;
