@@ -8,6 +8,7 @@ export default defineConfig({
       twitter: "./widgets/twitter.js",
       twitch: "./widgets/twitch.js",
       flixpatrol: "./widgets/flixpatrol.js",
+      anigamer: "./widgets/anigamer.js",
       bilibili: "./widgets/bilibili.js",
       douyin: "./widgets/douyin.js"
     }
