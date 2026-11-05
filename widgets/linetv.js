@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "makka.linetv.catalog",
   title: "LINE TV",
-  version: "2.0.0",
+  version: "2.0.1",
   requiredVersion: "0.0.1",
   description: "LINE TV 公开目录、详情、分集与动态播放源；支持 HLS 及 Widevine DASH",
   author: "MakkaPakka",
@@ -370,6 +370,87 @@ async function dinosaurToken(source, dramaId, episode) {
   return body && body.token || "";
 }
 
+function resolveHlsUrl(baseUrl, value) {
+  const raw = String(value || "").trim();
+  if (!raw || /^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("//")) return `https:${raw}`;
+  const base = String(baseUrl || "").match(/^(https?:\/\/[^/]+)(\/[^?#]*)?/i);
+  if (!base) return raw;
+  const origin = base[1];
+  const suffixIndex = raw.search(/[?#]/);
+  const suffix = suffixIndex >= 0 ? raw.slice(suffixIndex) : "";
+  const rawPath = suffixIndex >= 0 ? raw.slice(0, suffixIndex) : raw;
+  const path = rawPath.startsWith("/")
+    ? rawPath
+    : `${(base[2] || "/").replace(/[^/]*$/, "")}${rawPath}`;
+  const normalized = [];
+  for (const part of path.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") normalized.pop();
+    else normalized.push(part);
+  }
+  return `${origin}/${normalized.join("/")}${suffix}`;
+}
+
+function withPlaybackTime(url, timestamp) {
+  const raw = String(url || "");
+  if (!raw.includes("/jurassicPark") || /(?:[?&])time=/.test(raw)) return raw;
+  return `${raw}${raw.includes("?") ? "&" : "?"}time=${timestamp}`;
+}
+
+function rewriteMediaPlaylist(text, playlistUrl, timestamp) {
+  return String(text || "").split(/\r?\n/).map(line => {
+    if (!line) return line;
+    if (!line.startsWith("#")) return withPlaybackTime(resolveHlsUrl(playlistUrl, line), timestamp);
+    return line.replace(/URI="([^"]+)"/g, (_, uri) => `URI="${withPlaybackTime(resolveHlsUrl(playlistUrl, uri), timestamp)}"`);
+  }).join("\n");
+}
+
+function parseMasterVariants(text, masterUrl) {
+  const lines = String(text || "").split(/\r?\n/);
+  const variants = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index].trim();
+    if (!line.startsWith("#EXT-X-STREAM-INF")) continue;
+    let uri = "";
+    for (let next = index + 1; next < lines.length; next++) {
+      const candidate = lines[next].trim();
+      if (!candidate) continue;
+      if (!candidate.startsWith("#")) uri = candidate;
+      break;
+    }
+    const resolution = line.match(/RESOLUTION=\d+x(\d+)/i);
+    const height = resolution ? Number(resolution[1]) : 0;
+    if (uri && height >= 720) variants.push({ height, url: resolveHlsUrl(masterUrl, uri) });
+  }
+  return variants.sort((left, right) => right.height - left.height);
+}
+
+async function hlsResources(url, headers) {
+  const timestamp = Date.now();
+  const masterUrl = withPlaybackTime(url, timestamp);
+  const response = await Widget.http.get(masterUrl, { headers });
+  const master = String(response && response.data || "");
+  if (!master.includes("#EXTM3U")) return [];
+  const variants = parseMasterVariants(master, url);
+  if (!variants.length) return [];
+  const resources = await Promise.all(variants.map(async variant => {
+    const playlistUrl = withPlaybackTime(variant.url, timestamp);
+    const playlistResponse = await Widget.http.get(playlistUrl, { headers });
+    const playlist = String(playlistResponse && playlistResponse.data || "");
+    if (!playlist.includes("#EXTM3U")) return null;
+    const rewritten = rewriteMediaPlaylist(playlist, variant.url, timestamp);
+    return {
+      name: `LINE TV ${variant.height}P`,
+      description: `${variant.height}P · HLS · 动态授权`,
+      url: `data:application/vnd.apple.mpegurl;charset=utf-8,${encodeURIComponent(rewritten)}`,
+      playerType: "app",
+      customHeaders: headers
+    };
+  }));
+  return resources.filter(Boolean);
+}
+
 loadResource = async function loadResource(params = {}) {
   const rawLink = params.link != null ? params.link : params.id;
   const owned = parseOwnedLink(rawLink);
@@ -397,19 +478,11 @@ loadResource = async function loadResource(params = {}) {
       }];
     }
     const hls = info.hls || {};
-    const mp4 = info.mp4 || {};
-    const url = hls.url || mp4.url;
-    if (!url) return [];
+    if (!hls.url) return [];
     const token = await dinosaurToken(source, owned.dramaId, episode);
     const headers = { Referer: `${SITE_ORIGIN}/drama/${owned.dramaId}/eps/${episode}`, "User-Agent": HEADERS["User-Agent"] };
     if (token) headers.authentication = token;
-    return [{
-      name: "LINE TV HLS",
-      description: token ? "HLS · 动态授权" : "HLS",
-      url: url.includes("/jurassicPark") ? `${url}${url.includes("?") ? "&" : "?"}time=${Date.now()}` : url,
-      playerType: "app",
-      customHeaders: headers
-    }];
+    return hlsResources(hls.url, headers);
   } catch (error) {
     console.error("[loadResource] 失败:", error.message || error);
     return [];
